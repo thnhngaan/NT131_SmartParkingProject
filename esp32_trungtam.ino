@@ -23,7 +23,7 @@
 //  ⚙️  CẤU HÌNH — chỉnh sửa phần này
 // ═══════════════════════════════════════════
 #define WIFI_SSID   "Pmin"
-#define WIFI_PASS   "13050709"
+#define WIFI_PASS   "13050709" // Sửa ở đây
 
 #define MQTT_HOST   "broker.hivemq.com"
 #define MQTT_PORT   1883

@@ -1,13 +1,11 @@
 /*
  * =============================================
- *  ESP32-CAM AI-Thinker — MẠCH VÀO
+ *  ESP32-CAM AI-Thinker — MẠCH RA
  * =============================================
- *  Chức năng:
- *    - Đọc thẻ RFID (RC522)
- *    - Chụp ảnh
- *    - Mở servo (cần gạt)
- *    - Bíp buzzer
- *    - Tự kết nối WiFi + publish MQTT
+ *  Giống hệt mạch VÀO, chỉ khác:
+ *    - MQTT_TOPIC = "parking/exit"
+ *    - MQTT_CLIENT = "esp32cam-exit-01"
+ *    - GATE_ID = "RGATE"
  *
  *  Thư viện cần cài (Library Manager):
  *    - MFRC522 by GithubCommunity
@@ -30,29 +28,24 @@
 //  ⚙️  CẤU HÌNH — chỉnh sửa phần này
 // ═══════════════════════════════════════════
 #define WIFI_SSID     "Pmin"
-#define WIFI_PASS     "13050709"
+#define WIFI_PASS     "13050709" // Sửa ở đây
 
 #define MQTT_HOST     "broker.hivemq.com"
 #define MQTT_PORT     1883
-#define MQTT_TOPIC    "parking/entry"       // topic cổng vào
-#define MQTT_CLIENT   "esp32cam-entry-01"   // tên duy nhất, không trùng
+#define MQTT_TOPIC    "parking/exit"        // ← khác mạch VÀO
+#define MQTT_CLIENT   "esp32cam-exit-01"    // ← khác mạch VÀO
 
-#define GATE_ID       "VGATE"
+#define GATE_ID       "RGATE"              // ← khác mạch VÀO
 #define SERVO_OPEN    90
 #define SERVO_CLOSE   0
 #define GATE_OPEN_MS  3000
 // ═══════════════════════════════════════════
 
-// ── Chân RC522 ───────────────────────────────
 #define RC522_SS    2
 #define RC522_RST   12
-// SCK=14, MOSI=15, MISO=13
-
-// ── Chân Servo & Buzzer ───────────────────────
 #define SERVO_PIN   4
 #define BUZZER_PIN  16
 
-// ── Camera AI-Thinker pinout ──────────────────
 #define PWDN_GPIO_NUM     32
 #define RESET_GPIO_NUM    -1
 #define XCLK_GPIO_NUM      0
@@ -70,13 +63,11 @@
 #define HREF_GPIO_NUM     23
 #define PCLK_GPIO_NUM     22
 
-// ─────────────────────────────────────────────
 MFRC522 rfid(RC522_SS, RC522_RST);
 Servo gateServo;
 WiFiClient wifiClient;
 PubSubClient mqtt(wifiClient);
 
-// ── Buzzer ────────────────────────────────────
 void beep(int times, int onMs = 100, int offMs = 100) {
   for (int i = 0; i < times; i++) {
     digitalWrite(BUZZER_PIN, HIGH);
@@ -86,7 +77,6 @@ void beep(int times, int onMs = 100, int offMs = 100) {
   }
 }
 
-// ── WiFi ──────────────────────────────────────
 void connectWiFi() {
   WiFi.begin(WIFI_SSID, WIFI_PASS);
   Serial.print("Connecting WiFi");
@@ -98,18 +88,16 @@ void connectWiFi() {
   }
   if (WiFi.status() == WL_CONNECTED) {
     Serial.println("\nWiFi OK: " + WiFi.localIP().toString());
-    beep(2, 80, 80);  // 2 bíp ngắn = WiFi OK
+    beep(2, 80, 80);
   } else {
     Serial.println("\nWiFi FAIL");
-    beep(3, 300, 100);  // 3 bíp dài = WiFi lỗi
+    beep(3, 300, 100);
   }
 }
 
-// ── MQTT ──────────────────────────────────────
 void connectMQTT() {
   mqtt.setServer(MQTT_HOST, MQTT_PORT);
-  mqtt.setBufferSize(20000);  // cần to vì payload có ảnh base64
-
+  mqtt.setBufferSize(20000);
   int retry = 0;
   while (!mqtt.connected() && retry < 5) {
     Serial.print("Connecting MQTT...");
@@ -129,7 +117,6 @@ void ensureMQTT() {
   mqtt.loop();
 }
 
-// ── Camera ────────────────────────────────────
 bool initCamera() {
   camera_config_t config;
   config.ledc_channel = LEDC_CHANNEL_0;
@@ -152,7 +139,7 @@ bool initCamera() {
   config.pin_reset    = RESET_GPIO_NUM;
   config.xclk_freq_hz = 20000000;
   config.pixel_format = PIXFORMAT_JPEG;
-  config.frame_size   = FRAMESIZE_QVGA;  // 320x240 — nhỏ gọn, gửi nhanh
+  config.frame_size   = FRAMESIZE_QVGA;
   config.jpeg_quality = 20;
   config.fb_count     = 1;
   return (esp_camera_init(&config) == ESP_OK);
@@ -166,7 +153,6 @@ String captureBase64() {
   return encoded;
 }
 
-// ── RFID ──────────────────────────────────────
 String getUID() {
   String uid = "";
   for (byte i = 0; i < rfid.uid.size; i++) {
@@ -177,40 +163,30 @@ String getUID() {
   return uid;
 }
 
-// ── Servo ─────────────────────────────────────
 void openGate() {
   gateServo.write(SERVO_OPEN);
   delay(GATE_OPEN_MS);
   gateServo.write(SERVO_CLOSE);
 }
 
-// ── Publish MQTT ──────────────────────────────
-// Payload JSON: {"gate":"VGATE","uid":"AABBCCDD","image":"base64..."}
 void publishData(String uid, String img) {
   ensureMQTT();
-
   String payload = "{";
   payload += "\"gate\":\"" + String(GATE_ID) + "\",";
   payload += "\"uid\":\"" + uid + "\",";
   payload += "\"image\":\"" + img + "\"";
   payload += "}";
-
   bool ok = mqtt.publish(MQTT_TOPIC, payload.c_str(), payload.length());
-  if (ok) {
-    Serial.println("MQTT publish OK");
-  } else {
-    Serial.println("MQTT publish FAIL");
-  }
+  Serial.println(ok ? "MQTT publish OK" : "MQTT publish FAIL");
 }
 
-// ─────────────────────────────────────────────
 void setup() {
   Serial.begin(115200);
 
   pinMode(BUZZER_PIN, OUTPUT);
   digitalWrite(BUZZER_PIN, LOW);
 
-  SPI.begin(14, 13, 15, 2);  // SCK, MISO, MOSI, SS
+  SPI.begin(14, 13, 15, 2);
   rfid.PCD_Init();
   Serial.println("RFID OK");
 
@@ -227,16 +203,13 @@ void setup() {
   connectWiFi();
   connectMQTT();
 
-  // Sẵn sàng: 1 bíp dài
   beep(1, 400);
   Serial.println("=== SAN SANG ===");
 }
 
 void loop() {
-  // Giữ kết nối MQTT
   ensureMQTT();
 
-  // Kiểm tra thẻ RFID
   if (!rfid.PICC_IsNewCardPresent() || !rfid.PICC_ReadCardSerial()) {
     delay(100);
     return;
@@ -247,23 +220,18 @@ void loop() {
   rfid.PCD_StopCrypto1();
   Serial.println("The: " + uid);
 
-  // Bíp 1 tiếng báo đọc thẻ
   beep(1, 100);
 
-  // Chụp ảnh
   String img = captureBase64();
 
-  // Mở cần gạt + bíp 2 tiếng
   beep(2, 80, 80);
   openGate();
 
-  // Gửi lên MQTT
   if (img.length() > 0) {
     publishData(uid, img);
   } else {
     Serial.println("Khong chup duoc anh");
   }
 
-  // Chống đọc thẻ liên tiếp
   delay(2000);
 }
