@@ -3,7 +3,7 @@ const TOTAL_CAPACITY = 300;
 
 const toSlotView = (slot) => ({
   ...slot.toObject(),
-  status: 'Occupied',
+  status: slot.exitTime ? 'OUT' : 'IN',
 });
 
 exports.getSlots = async (req, res) => {
@@ -72,6 +72,82 @@ exports.getAnalytics = async (req, res) => {
     const occupied = await ParkingSlot.countDocuments();
     const available = Math.max(TOTAL_CAPACITY - occupied, 0);
     res.json({ total: TOTAL_CAPACITY, occupied, available });
+  } catch (err) {
+    res.status(500).json({ message: err.message });
+  }
+};
+
+exports.getHistoricalFlow = async (req, res) => {
+  try {
+    const date = req.query.date;
+    const targetDate = date ? new Date(`${date}T00:00:00`) : new Date();
+    if (Number.isNaN(targetDate.getTime())) {
+      return res.status(400).json({ message: 'Invalid date format. Use YYYY-MM-DD.' });
+    }
+
+    const start = new Date(targetDate);
+    start.setHours(0, 0, 0, 0);
+    const end = new Date(targetDate);
+    end.setHours(23, 59, 59, 999);
+
+    const slots = await ParkingSlot.find({
+      $or: [
+        { entryTime: { $gte: start, $lte: end } },
+        { exitTime: { $gte: start, $lte: end } },
+      ],
+    }).select('entryTime exitTime');
+
+    const inBuckets = Array.from({ length: 24 }, () => 0);
+    const outBuckets = Array.from({ length: 24 }, () => 0);
+
+    slots.forEach((slot) => {
+      if (slot.entryTime) {
+        const d = new Date(slot.entryTime);
+        if (d >= start && d <= end) inBuckets[d.getHours()] += 1;
+      }
+      if (slot.exitTime) {
+        const d = new Date(slot.exitTime);
+        if (d >= start && d <= end) outBuckets[d.getHours()] += 1;
+      }
+    });
+
+    const result = Array.from({ length: 24 }, (_, hour) => {
+      const ds = new Date(start);
+      ds.setHours(hour, 0, 0, 0);
+      return {
+        ds: ds.toISOString().slice(0, 19).replace('T', ' '),
+        in: inBuckets[hour],
+        out: outBuckets[hour],
+      };
+    });
+
+    res.json(result);
+  } catch (err) {
+    res.status(500).json({ message: err.message });
+  }
+};
+
+function startEndOfLocalToday() {
+  const start = new Date();
+  start.setHours(0, 0, 0, 0);
+  const end = new Date();
+  end.setHours(23, 59, 59, 999);
+  return { start, end };
+}
+
+exports.getTodaySummary = async (req, res) => {
+  try {
+    const { start, end } = startEndOfLocalToday();
+    const enteredToday = await ParkingSlot.countDocuments({
+      entryTime: { $gte: start, $lte: end },
+    });
+    const occupied = await ParkingSlot.countDocuments();
+    const available = Math.max(TOTAL_CAPACITY - occupied, 0);
+    res.json({
+      enteredToday,
+      available,
+      totalCapacity: TOTAL_CAPACITY,
+    });
   } catch (err) {
     res.status(500).json({ message: err.message });
   }

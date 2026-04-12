@@ -89,6 +89,12 @@
       const data = await res.json();
 
       if (res.ok) {
+        if (data.requiresVerification) {
+          alert(data.message || 'Check with the organization for your PIN, then verify your admin account.');
+          const emailEnc = encodeURIComponent(email.trim().toLowerCase());
+          window.location.href = '/verify-admin?email=' + emailEnc;
+          return;
+        }
         alert('User created, please login');
         window.location.href = '/login';
       } else {

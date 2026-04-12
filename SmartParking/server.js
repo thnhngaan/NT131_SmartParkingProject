@@ -24,7 +24,9 @@ app.use('/api/parking', parkingRoutes);
 app.get('/', (req, res) => res.render('index'));
 app.get('/login', (req, res) => res.render('login'));
 app.get('/signup', (req, res) => res.render('signup'));
+app.get('/verify-admin', (req, res) => res.render('verify-admin'));
 app.get('/dashboard', (req, res) => res.render('dashboard'));
+app.get('/analytics', (req, res) => res.render('analytics'));
 
 const errorHandler = require('./middleware/error');
 app.use(errorHandler);

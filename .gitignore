@@ -2,6 +2,10 @@
 .env
 .env.*
 !.env.example
+SmartParking/.venv/
+.env
+pycache/
+*.pyc
 
 # === Dependencies ===
 node_modules/
