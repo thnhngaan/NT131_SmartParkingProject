@@ -37,41 +37,33 @@
           <p id="greetingText" class="text-gray-500 mt-1">Hello, User</p>
         </div>
         <div id="userPanel" class="hidden flex flex-col gap-6">
-          <!-- Logo on top -->
-          <div class="flex justify-center items-center gap-6 mb-8">
 
-            <img
-              src="/images/logo_mmt-nth.png"
-              alt="logo 1"
-              class="w-28 md:w-32 object-contain"
-            />
-          
-            <img
-              src="/images/Logo ĐH Công Nghệ Thông Tin - UIT.png"
-              alt="logo 2"
-              class="w-28 md:w-32 object-contain"
-            />
-          
+          <!-- Logo -->
+          <div class="flex justify-center items-center gap-6 mb-8">
+            <img src="/images/logo_mmt-nth.png" alt="logo 1" class="w-28 md:w-32 object-contain" />
+            <img src="/images/Logo ĐH Công Nghệ Thông Tin - UIT.png" alt="logo 2" class="w-28 md:w-32 object-contain" />
           </div>
+
           <p class="text-gray-600 mb-6 text-center">
             Today&rsquo;s parking overview
           </p>
-          <!-- Centered Cards -->
+
           <div class="grid grid-cols-1 sm:grid-cols-2 gap-6 max-w-4xl mx-auto w-full">
-          
-            <!-- Vehicles Entered -->
-            <div class="bg-gradient-to-br from-indigo-500 to-purple-600 text-white p-6 rounded-2xl shadow-lg hover:shadow-xl transition duration-300 text-center">
+
+            <div class="bg-gradient-to-br from-indigo-500 to-purple-600 text-white p-6 rounded-2xl shadow-lg">
               <p class="text-sm opacity-90">Vehicles entered today</p>
               <h2 id="userEnteredToday" class="text-4xl font-bold mt-3">-</h2>
             </div>
-          
-            <!-- Available Slots -->
-            <div class="bg-gradient-to-br from-indigo-500 to-purple-600 text-white p-6 rounded-2xl shadow-lg hover:shadow-xl transition duration-300 text-center">
+
+            <div class="bg-gradient-to-br from-indigo-500 to-purple-600 text-white p-6 rounded-2xl shadow-lg">
               <p class="text-sm opacity-90">Available slots now</p>
               <h2 id="userAvailableSlots" class="text-4xl font-bold mt-3">-</h2>
             </div>
-          
+
           </div>
+        </div>
+
+        <!-- ADMIN PANEL -->
         <div id="adminPanel" class="hidden flex flex-col flex-1 min-h-0">
           <div id="analytics" class="grid grid-cols-1 md:grid-cols-3 gap-5 mb-6"></div>
 
