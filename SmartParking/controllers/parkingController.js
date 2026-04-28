@@ -1,15 +1,92 @@
-const ParkingSlot = require('../models/ParkingSlot');
+const Parking = require('../models/Parking');
 const TOTAL_CAPACITY = 300;
 
-const toSlotView = (slot) => ({
-  ...slot.toObject(),
-  status: slot.exitTime ? 'OUT' : 'IN',
-});
+const normalizePlate = (plate) => {
+  const value = String(plate || '').trim().toUpperCase();
+  return value || 'UNKNOWN';
+};
+
+const emitParkingUpdate = (io, record) => {
+  if (io && record) {
+    io.emit('parking_update', record.toObject ? record.toObject() : record);
+  }
+};
+
+async function createEntryRecord({ uid, plateNumber, entryTime = new Date() }) {
+  const record = await Parking.create({
+    uid,
+    slotNumber: normalizePlate(plateNumber),
+    entryTime,
+    status: 'IN',
+    createdAt: entryTime,
+  });
+
+  return record;
+}
+
+async function processExitRecord({ activeRecord, detectedPlate, exitTime = new Date() }) {
+  const normalizedDetectedPlate = normalizePlate(detectedPlate);
+  const normalizedStoredPlate = normalizePlate(activeRecord.slotNumber);
+
+  if (
+    normalizedStoredPlate !== 'UNKNOWN' &&
+    normalizedDetectedPlate !== 'UNKNOWN' &&
+    normalizedStoredPlate !== normalizedDetectedPlate
+  ) {
+    console.warn(
+      `Plate mismatch for UID ${activeRecord.uid}: stored=${normalizedStoredPlate}, detected=${normalizedDetectedPlate}`
+    );
+  }
+
+  activeRecord.exitTime = exitTime;
+  activeRecord.status = 'OUT';
+  await activeRecord.save();
+
+  return activeRecord;
+}
+
+async function processParkingCapture({ uid, status = 'IN', yoloResult, io }) {
+  const normalizedStatus = String(status || 'IN').trim().toUpperCase() === 'OUT' ? 'OUT' : 'IN';
+  const detectedPlate = normalizePlate(
+    yoloResult && yoloResult.detected ? yoloResult.plate_text : 'UNKNOWN'
+  );
+
+  if (normalizedStatus === 'OUT') {
+    const activeRecord = await Parking.findOne({ uid, status: 'IN' }).sort({ entryTime: -1 });
+    if (!activeRecord) {
+      console.warn(`No active parking record found for UID ${uid} during exit.`);
+      return null;
+    }
+
+    const updatedRecord = await processExitRecord({
+      activeRecord,
+      detectedPlate,
+    });
+
+    emitParkingUpdate(io, updatedRecord);
+    return updatedRecord;
+  }
+
+  const activeRecord = await Parking.findOne({ uid, status: 'IN' }).sort({ entryTime: -1 });
+  if (activeRecord) {
+    return activeRecord;
+  }
+
+  const createdRecord = await createEntryRecord({
+    uid,
+    plateNumber: detectedPlate,
+  });
+
+  emitParkingUpdate(io, createdRecord);
+  return createdRecord;
+}
+
+exports.processParkingCapture = processParkingCapture;
 
 exports.getSlots = async (req, res) => {
   try {
-    const slots = await ParkingSlot.find().sort({ createdAt: -1 });
-    res.json(slots.map(toSlotView));
+    const records = await Parking.find().sort({ createdAt: -1 });
+    res.json(records);
   } catch (err) {
     res.status(500).json({ message: err.message });
   }
@@ -17,26 +94,19 @@ exports.getSlots = async (req, res) => {
 
 exports.addSlot = async (req, res) => {
   try {
-    const { slotNumber } = req.body;
+    const { slotNumber, uid = '' } = req.body;
     if (!slotNumber) {
       return res.status(400).json({ message: 'slotNumber is required' });
     }
 
-    const occupied = await ParkingSlot.countDocuments();
-    if (occupied >= TOTAL_CAPACITY) {
-      return res.status(400).json({ message: 'Parking is full. No available slots.' });
-    }
-
-    const slot = new ParkingSlot({
-      slotNumber,
-      entryTime: new Date(),
+    const record = await createEntryRecord({
+      uid,
+      plateNumber: slotNumber,
     });
-    await slot.save();
-    res.status(201).json(toSlotView(slot));
+
+    emitParkingUpdate(req.app.get('io'), record);
+    res.status(201).json(record);
   } catch (err) {
-    if (err.code === 11000) {
-      return res.status(400).json({ message: 'slotNumber already exists' });
-    }
     res.status(400).json({ message: err.message });
   }
 };
@@ -44,24 +114,22 @@ exports.addSlot = async (req, res) => {
 exports.deleteSlot = async (req, res) => {
   try {
     const { id } = req.params;
-    const slot = await ParkingSlot.findById(id);
-    if (!slot) {
-      return res.status(404).json({ message: 'Slot not found' });
+    const record = await Parking.findById(id);
+    if (!record) {
+      return res.status(404).json({ message: 'Parking record not found' });
     }
 
-    slot.exitTime = new Date();
-    await slot.deleteOne();
+    if (record.status === 'OUT') {
+      return res.status(400).json({ message: 'Parking record already checked out' });
+    }
 
-    const occupied = await ParkingSlot.countDocuments();
-    res.json({
-      message: 'Car exited and slot released',
-      exitTime: slot.exitTime,
-      analytics: {
-        total: TOTAL_CAPACITY,
-        occupied,
-        available: Math.max(TOTAL_CAPACITY - occupied, 0),
-      },
+    const updatedRecord = await processExitRecord({
+      activeRecord: record,
+      detectedPlate: record.slotNumber,
     });
+
+    emitParkingUpdate(req.app.get('io'), updatedRecord);
+    res.json(updatedRecord);
   } catch (err) {
     res.status(500).json({ message: err.message });
   }
@@ -69,7 +137,7 @@ exports.deleteSlot = async (req, res) => {
 
 exports.getAnalytics = async (req, res) => {
   try {
-    const occupied = await ParkingSlot.countDocuments();
+    const occupied = await Parking.countDocuments({ status: 'IN' });
     const available = Math.max(TOTAL_CAPACITY - occupied, 0);
     res.json({ total: TOTAL_CAPACITY, occupied, available });
   } catch (err) {
@@ -90,7 +158,7 @@ exports.getHistoricalFlow = async (req, res) => {
     const end = new Date(targetDate);
     end.setHours(23, 59, 59, 999);
 
-    const slots = await ParkingSlot.find({
+    const records = await Parking.find({
       $or: [
         { entryTime: { $gte: start, $lte: end } },
         { exitTime: { $gte: start, $lte: end } },
@@ -100,13 +168,13 @@ exports.getHistoricalFlow = async (req, res) => {
     const inBuckets = Array.from({ length: 24 }, () => 0);
     const outBuckets = Array.from({ length: 24 }, () => 0);
 
-    slots.forEach((slot) => {
-      if (slot.entryTime) {
-        const d = new Date(slot.entryTime);
+    records.forEach((record) => {
+      if (record.entryTime) {
+        const d = new Date(record.entryTime);
         if (d >= start && d <= end) inBuckets[d.getHours()] += 1;
       }
-      if (slot.exitTime) {
-        const d = new Date(slot.exitTime);
+      if (record.exitTime) {
+        const d = new Date(record.exitTime);
         if (d >= start && d <= end) outBuckets[d.getHours()] += 1;
       }
     });
@@ -138,10 +206,10 @@ function startEndOfLocalToday() {
 exports.getTodaySummary = async (req, res) => {
   try {
     const { start, end } = startEndOfLocalToday();
-    const enteredToday = await ParkingSlot.countDocuments({
+    const enteredToday = await Parking.countDocuments({
       entryTime: { $gte: start, $lte: end },
     });
-    const occupied = await ParkingSlot.countDocuments();
+    const occupied = await Parking.countDocuments({ status: 'IN' });
     const available = Math.max(TOTAL_CAPACITY - occupied, 0);
     res.json({
       enteredToday,

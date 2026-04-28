@@ -6,6 +6,10 @@ SmartParking/.venv/
 .env
 pycache/
 *.pyc
+**/venv/
+**/.venv/
+venv/
+.venv/
 
 # === Dependencies ===
 node_modules/
