@@ -3,82 +3,61 @@
 #include <SPI.h>
 #include <MFRC522.h>
 #include <ESP32Servo.h>
-#include <ArduinoJson.h>
 
-// ================= WIFI / MQTT =================
+// ================= WIFI =================
 const char* WIFI_SSID = "Pmin";
 const char* WIFI_PASS = "13050709";
 
-const char* MQTT_HOST = "192.168.1.100";   // IP server Ubuntu chạy mosquitto
-const int   MQTT_PORT = 1883;
+// ================= MQTT =================
+const char* MQTT_HOST = "10.122.67.182";
+const int MQTT_PORT = 1883;
 
-// ================= PIN MAP =================
-// RC522 #1 - ENTRY
-#define SS_ENTRY   21
-#define RST_ENTRY  13
+// ================= RFID =================
+#define SPI_SCK   18
+#define SPI_MISO  19
+#define SPI_MOSI  23
 
-// RC522 #2 - EXIT
-#define SS_EXIT    22
-#define RST_EXIT   14
+#define SS_IN     21
+#define RST_IN    13
 
-// SPI shared
-#define SPI_SCK    18
-#define SPI_MISO   19
-#define SPI_MOSI   23
+#define SS_OUT    27
+#define RST_OUT   26
 
-// Servo
-#define SERVO_IN_PIN   25
-#define SERVO_OUT_PIN  26
+// ================= IR =================
+#define IR1_PIN   34
+#define IR2_PIN   35
 
-// Buzzer
-#define BUZZER_IN_PIN  32
-#define BUZZER_OUT_PIN 33
+// ================= BUZZER =================
+#define BUZZER_IN_PIN   32
+#define BUZZER_OUT_PIN  33
 
-// IR slots
-#define IR_SLOT_1      34
-#define IR_SLOT_2      35
+// ================= SERVO =================
+#define SERVO_IN_PIN    25
+#define SERVO_OUT_PIN   14
 
-// ================= OBJECTS =================
 WiFiClient espClient;
 PubSubClient mqtt(espClient);
 
-MFRC522 rfidEntry(SS_ENTRY, RST_ENTRY);
-MFRC522 rfidExit(SS_EXIT, RST_EXIT);
+MFRC522 rfidIn(SS_IN, RST_IN);
+MFRC522 rfidOut(SS_OUT, RST_OUT);
 
 Servo servoIn;
 Servo servoOut;
 
-// ================= CONFIG =================
-const int SERVO_CLOSED = 0;
-const int SERVO_OPEN   = 90;
+// Nếu buzzer của bạn LOW mới kêu thì để true
+bool BUZZER_ACTIVE_LOW = true;
 
-bool slot1Occupied = false;
-bool slot2Occupied = false;
-int availableSlots = 0;
-
-// Danh sách UID hợp lệ demo
-String validUIDs[] = {
-  "A1B2C3D4",
-  "11223344",
-  "DEADBEEF"
-};
-const int validUIDCount = sizeof(validUIDs) / sizeof(validUIDs[0]);
-
-// Lưu trạng thái xe đang trong bãi theo UID
 String parkedUIDs[50];
 int parkedCount = 0;
 
-// Chờ server duyệt cổng ra
-String pendingExitEventId = "";
 String pendingExitUID = "";
+String pendingExitToken = "";
 bool waitingExitDecision = false;
 unsigned long exitRequestMillis = 0;
-const unsigned long EXIT_TIMEOUT = 15000;
+const unsigned long EXIT_TIMEOUT_MS = 15000;
 
-// publish trạng thái định kỳ
-unsigned long lastStatusPub = 0;
+unsigned long lastIRPublish = 0;
 
-// ================= HELPERS =================
 String uidToString(MFRC522::Uid *uid) {
   String s = "";
   for (byte i = 0; i < uid->size; i++) {
@@ -89,11 +68,10 @@ String uidToString(MFRC522::Uid *uid) {
   return s;
 }
 
+// ===== SUA O DAY NEU MUON WHITELIST =====
+// Hien tai: the nao quet duoc cung hop le
 bool isValidUID(const String &uid) {
-  for (int i = 0; i < validUIDCount; i++) {
-    if (uid == validUIDs[i]) return true;
-  }
-  return false;
+  return true;
 }
 
 bool isParked(const String &uid) {
@@ -105,9 +83,7 @@ bool isParked(const String &uid) {
 
 void addParked(const String &uid) {
   if (isParked(uid)) return;
-  if (parkedCount < 50) {
-    parkedUIDs[parkedCount++] = uid;
-  }
+  if (parkedCount < 50) parkedUIDs[parkedCount++] = uid;
 }
 
 void removeParked(const String &uid) {
@@ -122,159 +98,76 @@ void removeParked(const String &uid) {
   }
 }
 
-String makeEventId(const String &prefix) {
-  return prefix + "_" + String((uint32_t)millis());
+void buzzerOn(int pin) {
+  digitalWrite(pin, BUZZER_ACTIVE_LOW ? LOW : HIGH);
+}
+
+void buzzerOff(int pin) {
+  digitalWrite(pin, BUZZER_ACTIVE_LOW ? HIGH : LOW);
 }
 
 void beep(int pin, int times, int onMs, int offMs) {
   for (int i = 0; i < times; i++) {
-    digitalWrite(pin, HIGH);
+    buzzerOn(pin);
     delay(onMs);
-    digitalWrite(pin, LOW);
+    buzzerOff(pin);
     delay(offMs);
   }
 }
 
-void openGate(Servo &servo, int pin) {
-  servo.write(SERVO_OPEN);
-  delay(2500);
-  servo.write(SERVO_CLOSED);
-}
-
-void publishSlots() {
-  StaticJsonDocument<128> doc;
-  doc["slot1"] = slot1Occupied;
-  doc["slot2"] = slot2Occupied;
-  doc["occupied"] = (slot1Occupied ? 1 : 0) + (slot2Occupied ? 1 : 0);
-  doc["available"] = availableSlots;
-  doc["full"] = (availableSlots == 0);
-
-  char buf[128];
-  serializeJson(doc, buf);
-  mqtt.publish("parking/slots", buf, true);
-}
-
-void requestCameraCapture(const char* topic, const String &eventId, const String &uid) {
-  StaticJsonDocument<192> doc;
-  doc["event_id"] = eventId;
-  doc["uid"] = uid;
-
-  char buf[192];
-  serializeJson(doc, buf);
-  mqtt.publish(topic, buf);
-}
-
-void publishEntryRequest(const String &eventId, const String &uid) {
-  StaticJsonDocument<192> doc;
-  doc["event_id"] = eventId;
-  doc["uid"] = uid;
-  doc["gate"] = "in";
-
-  char buf[192];
-  serializeJson(doc, buf);
-  mqtt.publish("parking/entry/request", buf);
-}
-
-void publishExitRequest(const String &eventId, const String &uid) {
-  StaticJsonDocument<192> doc;
-  doc["event_id"] = eventId;
-  doc["uid"] = uid;
-  doc["gate"] = "out";
-
-  char buf[192];
-  serializeJson(doc, buf);
-  mqtt.publish("parking/exit/request", buf);
-}
-
-void updateSlots() {
-  // LM393 thường: LOW = có xe, HIGH = trống
-  slot1Occupied = (digitalRead(IR_SLOT_1) == LOW);
-  slot2Occupied = (digitalRead(IR_SLOT_2) == LOW);
-
-  int occupied = (slot1Occupied ? 1 : 0) + (slot2Occupied ? 1 : 0);
-  availableSlots = 2 - occupied;
-}
-
-void handleEntryCard() {
-  if (!rfidEntry.PICC_IsNewCardPresent()) return;
-  if (!rfidEntry.PICC_ReadCardSerial()) return;
-
-  String uid = uidToString(&rfidEntry.uid);
-  Serial.println("ENTRY UID: " + uid);
-
-  rfidEntry.PICC_HaltA();
-  rfidEntry.PCD_StopCrypto1();
-
-  updateSlots();
-
-  if (!isValidUID(uid)) {
-    Serial.println("Entry denied: invalid UID");
-    beep(BUZZER_IN_PIN, 3, 100, 100);
-    return;
+void moveServoSmooth(Servo &servo, int fromAngle, int toAngle, int stepDelayMs) {
+  if (fromAngle < toAngle) {
+    for (int a = fromAngle; a <= toAngle; a++) {
+      servo.write(a);
+      delay(stepDelayMs);
+    }
+  } else {
+    for (int a = fromAngle; a >= toAngle; a--) {
+      servo.write(a);
+      delay(stepDelayMs);
+    }
   }
-
-  if (availableSlots <= 0) {
-    Serial.println("Entry denied: full");
-    beep(BUZZER_IN_PIN, 2, 300, 150);
-    return;
-  }
-
-  if (isParked(uid)) {
-    Serial.println("Entry denied: already parked");
-    beep(BUZZER_IN_PIN, 3, 80, 80);
-    return;
-  }
-
-  String eventId = makeEventId("ENTRY");
-
-  requestCameraCapture("parking/cam/in/cmd", eventId, uid);
-  publishEntryRequest(eventId, uid);
-
-  beep(BUZZER_IN_PIN, 1, 150, 50);
-  openGate(servoIn, SERVO_IN_PIN);
-
-  addParked(uid);
-  Serial.println("Entry allowed");
 }
 
-void handleExitCard() {
-  if (!rfidExit.PICC_IsNewCardPresent()) return;
-  if (!rfidExit.PICC_ReadCardSerial()) return;
+void openGateSmooth(Servo &servo) {
+  moveServoSmooth(servo, 0, 90, 15);
+  delay(700);
+  moveServoSmooth(servo, 90, 0, 15);
+}
 
-  String uid = uidToString(&rfidExit.uid);
-  Serial.println("EXIT UID: " + uid);
+bool slot1Occupied() {
+  return digitalRead(IR1_PIN) == LOW;
+}
 
-  rfidExit.PICC_HaltA();
-  rfidExit.PCD_StopCrypto1();
+bool slot2Occupied() {
+  return digitalRead(IR2_PIN) == LOW;
+}
 
-  if (!isValidUID(uid)) {
-    Serial.println("Exit denied: invalid UID");
-    beep(BUZZER_OUT_PIN, 3, 100, 100);
-    return;
+int availableSlots() {
+  int occupied = (slot1Occupied() ? 1 : 0) + (slot2Occupied() ? 1 : 0);
+  return 2 - occupied;
+}
+
+void connectWiFi() {
+  if (WiFi.status() == WL_CONNECTED) return;
+
+  Serial.print("Dang ket noi WiFi");
+  WiFi.mode(WIFI_STA);
+  WiFi.begin(WIFI_SSID, WIFI_PASS);
+
+  unsigned long start = millis();
+  while (WiFi.status() != WL_CONNECTED && millis() - start < 12000) {
+    delay(500);
+    Serial.print(".");
   }
+  Serial.println();
 
-  if (!isParked(uid)) {
-    Serial.println("Exit denied: UID not found in parking");
-    beep(BUZZER_OUT_PIN, 2, 300, 100);
-    return;
+  if (WiFi.status() == WL_CONNECTED) {
+    Serial.print("WiFi OK, IP: ");
+    Serial.println(WiFi.localIP());
+  } else {
+    Serial.println("WiFi chua ket noi duoc");
   }
-
-  if (waitingExitDecision) {
-    Serial.println("Still waiting previous exit decision");
-    beep(BUZZER_OUT_PIN, 2, 80, 80);
-    return;
-  }
-
-  pendingExitUID = uid;
-  pendingExitEventId = makeEventId("EXIT");
-  waitingExitDecision = true;
-  exitRequestMillis = millis();
-
-  requestCameraCapture("parking/cam/out/cmd", pendingExitEventId, uid);
-  publishExitRequest(pendingExitEventId, uid);
-
-  Serial.println("Exit request sent, waiting server decision...");
-  beep(BUZZER_OUT_PIN, 1, 80, 50);
 }
 
 void mqttCallback(char* topic, byte* payload, unsigned int length) {
@@ -283,114 +176,220 @@ void mqttCallback(char* topic, byte* payload, unsigned int length) {
 
   Serial.print("MQTT [");
   Serial.print(topic);
-  Serial.print("]: ");
+  Serial.print("] ");
   Serial.println(msg);
 
+  if (String(topic) == "parking/cam/in/result") {
+    // CHI LOG - KHONG CAN XU LY THEM O DAY
+  }
+
   if (String(topic) == "parking/exit/decision") {
-    StaticJsonDocument<192> doc;
-    DeserializationError err = deserializeJson(doc, msg);
-    if (err) return;
+    int allowPos = msg.indexOf("\"allow\":");
+    bool allow = false;
+    if (allowPos >= 0) {
+      String sub = msg.substring(allowPos + 8);
+      allow = sub.startsWith("true");
+    }
 
-    String eventId = doc["event_id"] | "";
-    bool allow = doc["allow"] | false;
+    int tokenPos = msg.indexOf("\"token\":\"");
+    String token = "";
+    if (tokenPos >= 0) {
+      tokenPos += 9;
+      int endPos = msg.indexOf("\"", tokenPos);
+      if (endPos > tokenPos) token = msg.substring(tokenPos, endPos);
+    }
 
-    if (waitingExitDecision && eventId == pendingExitEventId) {
+    if (waitingExitDecision && token == pendingExitToken) {
       if (allow) {
-        Serial.println("Exit approved by server");
+        Serial.println("Server cho phep xe ra");
         beep(BUZZER_OUT_PIN, 2, 120, 80);
-        openGate(servoOut, SERVO_OUT_PIN);
+        openGateSmooth(servoOut);
         removeParked(pendingExitUID);
       } else {
-        Serial.println("Exit denied by server");
-        beep(BUZZER_OUT_PIN, 3, 120, 100);
+        Serial.println("Server tu choi xe ra");
+        beep(BUZZER_OUT_PIN, 3, 120, 80);
       }
 
       waitingExitDecision = false;
-      pendingExitEventId = "";
       pendingExitUID = "";
+      pendingExitToken = "";
     }
   }
-}
-
-void connectWiFi() {
-  WiFi.mode(WIFI_STA);
-  WiFi.begin(WIFI_SSID, WIFI_PASS);
-
-  Serial.print("Connecting WiFi");
-  while (WiFi.status() != WL_CONNECTED) {
-    delay(500);
-    Serial.print(".");
-  }
-  Serial.println("\nWiFi connected");
-  Serial.println(WiFi.localIP());
 }
 
 void connectMQTT() {
+  if (mqtt.connected()) return;
+  if (WiFi.status() != WL_CONNECTED) return;
+
   while (!mqtt.connected()) {
     String clientId = "ESP32_MAIN_" + String((uint32_t)ESP.getEfuseMac(), HEX);
-    Serial.print("Connecting MQTT...");
+    Serial.print("Dang ket noi MQTT...");
     if (mqtt.connect(clientId.c_str())) {
       Serial.println("OK");
+      mqtt.subscribe("parking/cam/in/result");
       mqtt.subscribe("parking/exit/decision");
-      publishSlots();
     } else {
-      Serial.print("Failed, rc=");
+      Serial.print("Loi rc=");
       Serial.println(mqtt.state());
       delay(2000);
+      connectWiFi();
+      if (WiFi.status() != WL_CONNECTED) break;
     }
   }
+}
+
+void publishIRStatus() {
+  String msg = "{";
+  msg += "\"ir1\":" + String(slot1Occupied() ? "true" : "false") + ",";
+  msg += "\"ir2\":" + String(slot2Occupied() ? "true" : "false") + ",";
+  msg += "\"available\":" + String(availableSlots());
+  msg += "}";
+
+  mqtt.publish("parking/ir/status", msg.c_str(), true);
+}
+
+void publishCamInCmd(const String &uid, const String &token) {
+  String msg = "{\"cmd\":\"capture\",\"uid\":\"" + uid + "\",\"token\":\"" + token + "\"}";
+  mqtt.publish("parking/cam/in/cmd", msg.c_str());
+}
+
+void publishCamOutCmd(const String &uid, const String &token) {
+  String msg = "{\"cmd\":\"capture\",\"uid\":\"" + uid + "\",\"token\":\"" + token + "\"}";
+  mqtt.publish("parking/cam/out/cmd", msg.c_str());
+}
+
+void publishExitRequest(const String &uid, const String &token) {
+  String msg = "{\"uid\":\"" + uid + "\",\"token\":\"" + token + "\"}";
+  mqtt.publish("parking/exit/request", msg.c_str());
+}
+
+void handleEntry() {
+  digitalWrite(SS_OUT, HIGH);
+
+  if (!rfidIn.PICC_IsNewCardPresent()) return;
+  if (!rfidIn.PICC_ReadCardSerial()) return;
+
+  String uid = uidToString(&rfidIn.uid);
+  Serial.print("IN UID: ");
+  Serial.println(uid);
+
+  if (!isValidUID(uid)) {
+    Serial.println("The vao khong hop le");
+    beep(BUZZER_IN_PIN, 3, 100, 80);
+  } else if (availableSlots() <= 0) {
+    Serial.println("Bai xe da day");
+    beep(BUZZER_IN_PIN, 2, 300, 120);
+  } else if (isParked(uid)) {
+    Serial.println("The nay da co xe trong bai");
+    beep(BUZZER_IN_PIN, 3, 80, 80);
+  } else {
+    String token = String(millis());
+    beep(BUZZER_IN_PIN, 1, 120, 50);
+    publishCamInCmd(uid, token);
+    openGateSmooth(servoIn);
+    addParked(uid);
+  }
+
+  rfidIn.PICC_HaltA();
+  rfidIn.PCD_StopCrypto1();
+  delay(500);
+}
+
+void handleExit() {
+  digitalWrite(SS_IN, HIGH);
+
+  if (!rfidOut.PICC_IsNewCardPresent()) return;
+  if (!rfidOut.PICC_ReadCardSerial()) return;
+
+  String uid = uidToString(&rfidOut.uid);
+  Serial.print("OUT UID: ");
+  Serial.println(uid);
+
+  if (!isValidUID(uid)) {
+    Serial.println("The ra khong hop le");
+    beep(BUZZER_OUT_PIN, 3, 100, 80);
+  } else if (!isParked(uid)) {
+    Serial.println("Khong tim thay xe trong bai");
+    beep(BUZZER_OUT_PIN, 2, 250, 100);
+  } else if (waitingExitDecision) {
+    Serial.println("Dang cho xac nhan xe ra truoc do");
+    beep(BUZZER_OUT_PIN, 2, 80, 80);
+  } else {
+    pendingExitUID = uid;
+    pendingExitToken = String(millis());
+    waitingExitDecision = true;
+    exitRequestMillis = millis();
+
+    beep(BUZZER_OUT_PIN, 1, 120, 50);
+    publishCamOutCmd(uid, pendingExitToken);
+    publishExitRequest(uid, pendingExitToken);
+    Serial.println("Da gui yeu cau xe ra len server");
+  }
+
+  rfidOut.PICC_HaltA();
+  rfidOut.PCD_StopCrypto1();
+  delay(500);
 }
 
 void setup() {
   Serial.begin(115200);
+  delay(1000);
+
+  pinMode(IR1_PIN, INPUT);
+  pinMode(IR2_PIN, INPUT);
 
   pinMode(BUZZER_IN_PIN, OUTPUT);
   pinMode(BUZZER_OUT_PIN, OUTPUT);
-  digitalWrite(BUZZER_IN_PIN, LOW);
-  digitalWrite(BUZZER_OUT_PIN, LOW);
+  buzzerOff(BUZZER_IN_PIN);
+  buzzerOff(BUZZER_OUT_PIN);
 
-  pinMode(IR_SLOT_1, INPUT);
-  pinMode(IR_SLOT_2, INPUT);
+  SPI.begin(SPI_SCK, SPI_MISO, SPI_MOSI);
+
+  pinMode(SS_IN, OUTPUT);
+  pinMode(SS_OUT, OUTPUT);
+  digitalWrite(SS_IN, HIGH);
+  digitalWrite(SS_OUT, HIGH);
+
+  rfidIn.PCD_Init();
+  delay(50);
+  rfidOut.PCD_Init();
+  delay(50);
 
   servoIn.setPeriodHertz(50);
   servoOut.setPeriodHertz(50);
   servoIn.attach(SERVO_IN_PIN, 500, 2400);
   servoOut.attach(SERVO_OUT_PIN, 500, 2400);
-  servoIn.write(SERVO_CLOSED);
-  servoOut.write(SERVO_CLOSED);
-
-  SPI.begin(SPI_SCK, SPI_MISO, SPI_MOSI);
-  rfidEntry.PCD_Init();
-  rfidExit.PCD_Init();
+  servoIn.write(0);
+  servoOut.write(0);
 
   connectWiFi();
   mqtt.setServer(MQTT_HOST, MQTT_PORT);
   mqtt.setCallback(mqttCallback);
 
-  updateSlots();
-  publishSlots();
+  Serial.println("ESP32 MAIN READY");
 }
 
 void loop() {
-  if (WiFi.status() != WL_CONNECTED) connectWiFi();
-  if (!mqtt.connected()) connectMQTT();
-  mqtt.loop();
+  connectWiFi();
+  connectMQTT();
 
-  updateSlots();
+  if (mqtt.connected()) {
+    mqtt.loop();
 
-  if (millis() - lastStatusPub > 3000) {
-    lastStatusPub = millis();
-    publishSlots();
+    if (millis() - lastIRPublish > 3000) {
+      lastIRPublish = millis();
+      publishIRStatus();
+    }
   }
 
-  if (waitingExitDecision && millis() - exitRequestMillis > EXIT_TIMEOUT) {
-    Serial.println("Exit decision timeout");
+  if (waitingExitDecision && millis() - exitRequestMillis > EXIT_TIMEOUT_MS) {
+    Serial.println("Het thoi gian cho server xac nhan xe ra");
     waitingExitDecision = false;
-    pendingExitEventId = "";
     pendingExitUID = "";
+    pendingExitToken = "";
     beep(BUZZER_OUT_PIN, 3, 200, 100);
   }
 
-  handleEntryCard();
-  handleExitCard();
+  handleEntry();
+  handleExit();
 }
