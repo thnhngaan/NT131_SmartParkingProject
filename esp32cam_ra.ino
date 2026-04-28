@@ -1,20 +1,19 @@
 #include "esp_camera.h"
 #include <WiFi.h>
 #include <PubSubClient.h>
-#include <HTTPClient.h>
-#include <ArduinoJson.h>
 
-// ================= WIFI / MQTT / HTTP =================
+// ===== WiFi =====
 const char* WIFI_SSID = "Pmin";
 const char* WIFI_PASS = "13050709";
 
-const char* MQTT_HOST = "192.168.1.100";
-const int   MQTT_PORT = 1883;
+// ===== MQTT =====
+const char* MQTT_HOST = "10.122.67.182";
+const int MQTT_PORT = 1883;
 
-// Server HTTP nhận ảnh
-const char* UPLOAD_URL = "http://192.168.1.100:5000/upload";
+WiFiClient espClient;
+PubSubClient mqtt(espClient);
 
-// ================= CAMERA PINS AI THINKER =================
+// ===== AI Thinker ESP32-CAM pins =====
 #define PWDN_GPIO_NUM     32
 #define RESET_GPIO_NUM    -1
 #define XCLK_GPIO_NUM      0
@@ -33,39 +32,9 @@ const char* UPLOAD_URL = "http://192.168.1.100:5000/upload";
 #define HREF_GPIO_NUM     23
 #define PCLK_GPIO_NUM     22
 
-WiFiClient espClient;
-PubSubClient mqtt(espClient);
-
-const char* CMD_TOPIC = "parking/cam/out/cmd";
-const char* RESULT_TOPIC = "parking/cam/out/result";
-
-void connectWiFi() {
-  WiFi.mode(WIFI_STA);
-  WiFi.begin(WIFI_SSID, WIFI_PASS);
-
-  Serial.print("Connecting WiFi");
-  while (WiFi.status() != WL_CONNECTED) {
-    delay(500);
-    Serial.print(".");
-  }
-  Serial.println("\nWiFi connected");
-  Serial.println(WiFi.localIP());
-}
-
-void connectMQTT() {
-  while (!mqtt.connected()) {
-    String clientId = "ESP32_CAM_OUT_" + String((uint32_t)ESP.getEfuseMac(), HEX);
-    Serial.print("Connecting MQTT...");
-    if (mqtt.connect(clientId.c_str())) {
-      Serial.println("OK");
-      mqtt.subscribe(CMD_TOPIC);
-    } else {
-      Serial.print("Failed rc=");
-      Serial.println(mqtt.state());
-      delay(2000);
-    }
-  }
-}
+String lastUID = "Chua co";
+String lastToken = "0";
+String lastStatus = "Chua chup";
 
 bool initCamera() {
   camera_config_t config;
@@ -90,90 +59,139 @@ bool initCamera() {
   config.xclk_freq_hz = 20000000;
   config.pixel_format = PIXFORMAT_JPEG;
 
-  if (psramFound()) {
-    config.frame_size = FRAMESIZE_QVGA;
-    config.jpeg_quality = 12;
-    config.fb_count = 2;
-  } else {
-    config.frame_size = FRAMESIZE_QQVGA;
-    config.jpeg_quality = 15;
-    config.fb_count = 1;
-  }
+  config.frame_size = FRAMESIZE_VGA;
+  config.jpeg_quality = 10;
+  config.fb_count = 1;
+  config.grab_mode = CAMERA_GRAB_WHEN_EMPTY;
 
   esp_err_t err = esp_camera_init(&config);
   if (err != ESP_OK) {
     Serial.printf("Camera init failed: 0x%x\n", err);
     return false;
   }
+
+  sensor_t *s = esp_camera_sensor_get();
+  if (s) {
+    s->set_brightness(s, 1);
+    s->set_contrast(s, 1);
+    s->set_saturation(s, 0);
+  }
+
+  Serial.println("CAM OUT init OK");
   return true;
 }
 
-bool uploadImage(const String &eventId, const String &uid) {
+void connectWiFi() {
+  if (WiFi.status() == WL_CONNECTED) return;
+
+  Serial.print("Dang ket noi WiFi");
+  WiFi.mode(WIFI_STA);
+  WiFi.begin(WIFI_SSID, WIFI_PASS);
+
+  unsigned long start = millis();
+  while (WiFi.status() != WL_CONNECTED && millis() - start < 12000) {
+    delay(500);
+    Serial.print(".");
+  }
+  Serial.println();
+
+  if (WiFi.status() == WL_CONNECTED) {
+    Serial.print("IP CAM OUT: ");
+    Serial.println(WiFi.localIP());
+  } else {
+    Serial.println("WiFi chua ket noi duoc");
+  }
+}
+
+void publishResult(const String &status, const String &uid, const String &token) {
+  String msg = "{\"status\":\"" + status + "\",\"uid\":\"" + uid + "\",\"token\":\"" + token + "\"}";
+  mqtt.publish("parking/cam/out/result", msg.c_str());
+  Serial.println(msg);
+}
+
+bool captureOnly() {
   camera_fb_t *fb = esp_camera_fb_get();
   if (!fb) {
     Serial.println("Capture failed");
     return false;
   }
 
-  HTTPClient http;
-  String url = String(UPLOAD_URL) + "?gate=out&event_id=" + eventId + "&uid=" + uid;
-  http.begin(url);
-  http.addHeader("Content-Type", "image/jpeg");
-
-  int code = http.POST(fb->buf, fb->len);
-  Serial.printf("HTTP upload code: %d\n", code);
+  Serial.print("CAM OUT capture OK, size = ");
+  Serial.println(fb->len);
 
   esp_camera_fb_return(fb);
-  http.end();
-
-  return (code > 0 && code < 300);
-}
-
-void publishResult(const String &eventId, const String &uid, bool ok) {
-  StaticJsonDocument<192> doc;
-  doc["event_id"] = eventId;
-  doc["uid"] = uid;
-  doc["ok"] = ok;
-
-  char buf[192];
-  serializeJson(doc, buf);
-  mqtt.publish(RESULT_TOPIC, buf);
+  return true;
 }
 
 void mqttCallback(char* topic, byte* payload, unsigned int length) {
   String msg;
   for (unsigned int i = 0; i < length; i++) msg += (char)payload[i];
 
-  if (String(topic) == CMD_TOPIC) {
-    StaticJsonDocument<192> doc;
-    DeserializationError err = deserializeJson(doc, msg);
-    if (err) return;
+  Serial.print("MQTT [");
+  Serial.print(topic);
+  Serial.print("] ");
+  Serial.println(msg);
 
-    String eventId = doc["event_id"] | "";
-    String uid = doc["uid"] | "";
+  if (String(topic) == "parking/cam/out/cmd") {
+    int uPos = msg.indexOf("\"uid\":\"");
+    if (uPos >= 0) {
+      uPos += 7;
+      int ePos = msg.indexOf("\"", uPos);
+      if (ePos > uPos) lastUID = msg.substring(uPos, ePos);
+    }
 
-    Serial.println("Capture command received");
-    bool ok = uploadImage(eventId, uid);
-    publishResult(eventId, uid, ok);
+    int tPos = msg.indexOf("\"token\":\"");
+    if (tPos >= 0) {
+      tPos += 9;
+      int ePos = msg.indexOf("\"", tPos);
+      if (ePos > tPos) lastToken = msg.substring(tPos, ePos);
+    }
+
+    bool ok = captureOnly();
+    lastStatus = ok ? "capture_ok" : "capture_fail";
+    publishResult(lastStatus, lastUID, lastToken);
+  }
+}
+
+void connectMQTT() {
+  if (mqtt.connected()) return;
+  if (WiFi.status() != WL_CONNECTED) return;
+
+  while (!mqtt.connected()) {
+    String clientId = "ESP32_CAM_OUT_" + String((uint32_t)ESP.getEfuseMac(), HEX);
+    Serial.print("Dang ket noi MQTT...");
+    if (mqtt.connect(clientId.c_str())) {
+      Serial.println("OK");
+      mqtt.subscribe("parking/cam/out/cmd");
+    } else {
+      Serial.print("Loi rc=");
+      Serial.println(mqtt.state());
+      delay(2000);
+      connectWiFi();
+      if (WiFi.status() != WL_CONNECTED) break;
+    }
   }
 }
 
 void setup() {
   Serial.begin(115200);
+  delay(1000);
 
   if (!initCamera()) {
-    while (true) {
-      delay(1000);
-    }
+    while (true) delay(1000);
   }
 
   connectWiFi();
+
   mqtt.setServer(MQTT_HOST, MQTT_PORT);
   mqtt.setCallback(mqttCallback);
+
+  Serial.println("ESP32-CAM OUT READY");
 }
 
 void loop() {
-  if (WiFi.status() != WL_CONNECTED) connectWiFi();
-  if (!mqtt.connected()) connectMQTT();
-  mqtt.loop();
+  connectWiFi();
+  connectMQTT();
+
+  if (mqtt.connected()) mqtt.loop();
 }
