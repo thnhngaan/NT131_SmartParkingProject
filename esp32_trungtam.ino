@@ -9,7 +9,7 @@ const char* WIFI_SSID = "Pmin";
 const char* WIFI_PASS = "13050709";
 
 // ================= MQTT =================
-const char* MQTT_HOST = "10.122.67.182";
+const char* MQTT_HOST = "10.62.149.182";
 const int MQTT_PORT = 1883;
 
 // ================= RFID =================
@@ -249,8 +249,16 @@ void publishIRStatus() {
 }
 
 void publishCamInCmd(const String &uid, const String &token) {
-  String msg = "{\"cmd\":\"capture\",\"uid\":\"" + uid + "\",\"token\":\"" + token + "\"}";
+  String msg = "{";
+  msg += "\"cmd\":\"capture\",";
+  msg += "\"uid\":\"" + uid + "\",";
+  msg += "\"token\":\"" + token + "\",";
+  msg += "\"cam_in_ip\":\"10.62.149.44\",";
+  msg += "\"photo_url\":\"http://10.62.149.44/photo?t=" + token + "\"";
+  msg += "}";
+
   mqtt.publish("parking/cam/in/cmd", msg.c_str());
+  Serial.println("CAM IN CMD: " + msg);
 }
 
 void publishCamOutCmd(const String &uid, const String &token) {
@@ -259,7 +267,13 @@ void publishCamOutCmd(const String &uid, const String &token) {
 }
 
 void publishExitRequest(const String &uid, const String &token) {
-  String msg = "{\"uid\":\"" + uid + "\",\"token\":\"" + token + "\"}";
+  String msg = "{";
+  msg += "\"uid\":\"" + uid + "\",";
+  msg += "\"token\":\"" + token + "\",";
+  msg += "\"cam_out_ip\":\"10.62.149.43\",";
+  msg += "\"photo_url\":\"http://10.62.149.43/photo?t=" + token + "\"";
+  msg += "}";
+
   mqtt.publish("parking/exit/request", msg.c_str());
 }
 
