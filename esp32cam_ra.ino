@@ -7,7 +7,7 @@
 const char* WIFI_SSID = "Pmin";
 const char* WIFI_PASS = "13050709";
 
-// ===== MQTT =====
+// ===== MQTT SERVER UBUNTU =====
 const char* MQTT_HOST = "10.62.149.182";
 const int MQTT_PORT = 1883;
 
@@ -46,6 +46,7 @@ bool initCamera() {
   camera_config_t config;
   config.ledc_channel = LEDC_CHANNEL_0;
   config.ledc_timer = LEDC_TIMER_0;
+
   config.pin_d0 = Y2_GPIO_NUM;
   config.pin_d1 = Y3_GPIO_NUM;
   config.pin_d2 = Y4_GPIO_NUM;
@@ -54,6 +55,7 @@ bool initCamera() {
   config.pin_d5 = Y7_GPIO_NUM;
   config.pin_d6 = Y8_GPIO_NUM;
   config.pin_d7 = Y9_GPIO_NUM;
+
   config.pin_xclk = XCLK_GPIO_NUM;
   config.pin_pclk = PCLK_GPIO_NUM;
   config.pin_vsync = VSYNC_GPIO_NUM;
@@ -62,9 +64,11 @@ bool initCamera() {
   config.pin_sscb_scl = SIOC_GPIO_NUM;
   config.pin_pwdn = PWDN_GPIO_NUM;
   config.pin_reset = RESET_GPIO_NUM;
+
   config.xclk_freq_hz = 20000000;
   config.pixel_format = PIXFORMAT_JPEG;
 
+  // Nếu chụp biển số mờ, thử SVGA hoặc XGA nếu nguồn ổn
   config.frame_size = FRAMESIZE_VGA;
   config.jpeg_quality = 10;
   config.fb_count = 1;
@@ -83,7 +87,7 @@ bool initCamera() {
     s->set_saturation(s, 0);
   }
 
-  Serial.println("CAM IN init OK");
+  Serial.println("CAM OUT init OK");
   return true;
 }
 
@@ -102,7 +106,7 @@ void connectWiFi() {
   Serial.println();
 
   if (WiFi.status() == WL_CONNECTED) {
-    Serial.print("IP CAM IN: ");
+    Serial.print("IP CAM OUT: ");
     Serial.println(WiFi.localIP());
   } else {
     Serial.println("WiFi chua ket noi duoc");
@@ -110,8 +114,14 @@ void connectWiFi() {
 }
 
 void publishResult(const String &status, const String &uid, const String &token) {
-  String msg = "{\"status\":\"" + status + "\",\"uid\":\"" + uid + "\",\"token\":\"" + token + "\"}";
-  mqtt.publish("parking/cam/in/result", msg.c_str());
+  String msg = "{";
+  msg += "\"status\":\"" + status + "\",";
+  msg += "\"uid\":\"" + uid + "\",";
+  msg += "\"token\":\"" + token + "\",";
+  msg += "\"photo_url\":\"http://" + WiFi.localIP().toString() + "/photo\"";
+  msg += "}";
+
+  mqtt.publish("parking/cam/out/result", msg.c_str());
   Serial.println(msg);
 }
 
@@ -140,10 +150,12 @@ bool captureAndStore() {
 
   memcpy(lastImageBuf, fb->buf, fb->len);
   lastImageLen = fb->len;
+
   esp_camera_fb_return(fb);
 
-  Serial.print("CAM IN capture OK, size = ");
+  Serial.print("CAM OUT capture OK, size = ");
   Serial.println(lastImageLen);
+
   return true;
 }
 
@@ -156,7 +168,7 @@ void mqttCallback(char* topic, byte* payload, unsigned int length) {
   Serial.print("] ");
   Serial.println(msg);
 
-  if (String(topic) == "parking/cam/in/cmd") {
+  if (String(topic) == "parking/cam/out/cmd") {
     int uPos = msg.indexOf("\"uid\":\"");
     if (uPos >= 0) {
       uPos += 7;
@@ -173,6 +185,7 @@ void mqttCallback(char* topic, byte* payload, unsigned int length) {
 
     bool ok = captureAndStore();
     lastStatus = ok ? "capture_ok" : "capture_fail";
+
     publishResult(lastStatus, lastUID, lastToken);
   }
 }
@@ -182,11 +195,12 @@ void connectMQTT() {
   if (WiFi.status() != WL_CONNECTED) return;
 
   while (!mqtt.connected()) {
-    String clientId = "ESP32_CAM_IN_" + String((uint32_t)ESP.getEfuseMac(), HEX);
+    String clientId = "ESP32_CAM_OUT_" + String((uint32_t)ESP.getEfuseMac(), HEX);
+
     Serial.print("Dang ket noi MQTT...");
     if (mqtt.connect(clientId.c_str())) {
       Serial.println("OK");
-      mqtt.subscribe("parking/cam/in/cmd");
+      mqtt.subscribe("parking/cam/out/cmd");
     } else {
       Serial.print("Loi rc=");
       Serial.println(mqtt.state());
@@ -199,13 +213,14 @@ void connectMQTT() {
 
 void handleRoot() {
   String html = "<html><body>";
-  html += "<h2>ESP32-CAM IN</h2>";
+  html += "<h2>ESP32-CAM OUT</h2>";
   html += "<p>IP: " + WiFi.localIP().toString() + "</p>";
   html += "<p>UID: " + lastUID + "</p>";
   html += "<p>Status: " + lastStatus + "</p>";
   html += "<p>Token: " + lastToken + "</p>";
-  html += "<p><a href='/photo'>Xem anh</a></p>";
+  html += "<p><a href='/photo?t=" + String(millis()) + "'>Xem anh moi nhat</a></p>";
   html += "</body></html>";
+
   server.send(200, "text/html", html);
 }
 
@@ -216,6 +231,7 @@ void handlePhoto() {
   }
 
   WiFiClient client = server.client();
+
   client.println("HTTP/1.1 200 OK");
   client.println("Content-Type: image/jpeg");
   client.print("Content-Length: ");
@@ -225,6 +241,7 @@ void handlePhoto() {
   client.println("Expires: 0");
   client.println("Connection: close");
   client.println();
+
   client.write(lastImageBuf, lastImageLen);
 }
 
@@ -245,7 +262,7 @@ void setup() {
   server.on("/photo", handlePhoto);
   server.begin();
 
-  Serial.println("ESP32-CAM IN READY");
+  Serial.println("ESP32-CAM OUT READY");
 }
 
 void loop() {
@@ -253,5 +270,6 @@ void loop() {
   connectMQTT();
 
   if (mqtt.connected()) mqtt.loop();
+
   server.handleClient();
 }
