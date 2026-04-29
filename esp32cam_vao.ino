@@ -8,7 +8,7 @@ const char* WIFI_SSID = "Pmin";
 const char* WIFI_PASS = "13050709";
 
 // ===== MQTT =====
-const char* MQTT_HOST = "10.122.67.182";
+const char* MQTT_HOST = "10.62.149.182";
 const int MQTT_PORT = 1883;
 
 WebServer server(80);
