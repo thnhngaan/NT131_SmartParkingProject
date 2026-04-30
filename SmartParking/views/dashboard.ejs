@@ -67,22 +67,22 @@
       <div class="flex items-center gap-3 mb-4">
         <div class="w-12 h-12 rounded-full bg-rose-100 flex items-center justify-center text-2xl flex-shrink-0">⚠️</div>
         <div>
-          <h2 class="text-lg font-bold text-gray-800">Cảnh báo biển số không khớp!</h2>
-          <p class="text-xs text-gray-500">Phát hiện sai lệch khi xe ra khỏi bãi</p>
+          <h2 class="text-lg font-bold text-gray-800">Warning! Unexpected Plate Mismatch</h2>
+          <p class="text-xs text-gray-500">Unexpected plate mismatch detected</p>
         </div>
       </div>
 
       <div class="bg-gray-50 rounded-xl p-4 space-y-3 mb-5 text-sm">
         <div class="flex justify-between">
-          <span class="text-gray-500">UID xe:</span>
+          <span class="text-gray-500">Vehicle UID:</span>
           <span id="alertUID" class="font-semibold text-gray-800"></span>
         </div>
         <div class="flex justify-between">
-          <span class="text-gray-500">Biển lúc vào:</span>
+          <span class="text-gray-500">Plate at Entry:</span>
           <span id="alertStoredPlate" class="font-semibold text-emerald-600 bg-emerald-50 px-2 py-0.5 rounded-lg"></span>
         </div>
         <div class="flex justify-between">
-          <span class="text-gray-500">Biển lúc ra:</span>
+          <span class="text-gray-500">Plate at Exit:</span>
           <span id="alertDetectedPlate" class="font-semibold text-rose-600 bg-rose-50 px-2 py-0.5 rounded-lg"></span>
         </div>
       </div>
@@ -90,15 +90,15 @@
       <!-- Plate images side by side -->
       <div class="grid grid-cols-2 gap-3 mb-5">
         <div class="text-center">
-          <p class="text-xs text-gray-500 mb-1">Ảnh lúc vào</p>
+          <p class="text-xs text-gray-500 mb-1">Image at Entry</p>
           <div class="h-20 bg-gray-100 rounded-lg overflow-hidden">
-            <img id="alertEntryImage" src="" alt="" class="w-full h-full object-cover" onerror="this.parentElement.innerHTML='<span class=\'text-gray-400 text-xs flex h-full items-center justify-center\'>Không có ảnh</span>'" />
+            <img id="alertEntryImage" style="max-width: 100%; height: auto;" />
           </div>
         </div>
         <div class="text-center">
-          <p class="text-xs text-gray-500 mb-1">Ảnh lúc ra</p>
+          <p class="text-xs text-gray-500 mb-1">Image at Exit</p>
           <div class="h-20 bg-gray-100 rounded-lg overflow-hidden">
-            <img id="alertExitImage" src="" alt="" class="w-full h-full object-cover" onerror="this.parentElement.innerHTML='<span class=\'text-gray-400 text-xs flex h-full items-center justify-center\'>Không có ảnh</span>'" />
+            <img id="alertExitImage" style="max-width: 100%; height: auto;" />
           </div>
         </div>
       </div>
@@ -472,7 +472,7 @@
           <p class="text-sm opacity-90">Occupied</p>
           <h2 class="text-3xl font-bold">${data.occupied}</h2>
         </div>
-        <div class="bg-gradient-to-r from-emerald-400 to-teal-500 text-white p-5 rounded-2xl shadow-md">
+        <div class="bg-gradient-to-r from-indigo-500 to-indigo-600 text-white p-5 rounded-2xl shadow-md">
           <p class="text-sm opacity-90">Available</p>
           <h2 class="text-3xl font-bold">${data.available}</h2>
         </div>`;
@@ -616,6 +616,9 @@
         }
       })
       .catch(() => {});
+  </script>
+</body>
+</html>
   </script>
 </body>
 </html>
