@@ -10,7 +10,7 @@ import numpy as np
 from ultralytics import YOLO
 import warnings
 warnings.filterwarnings("ignore")
-
+#File này dùng để detect biển số từ ảnh, sử dụng sẵn model được train sẵn (license_plate_detector.pt) và easyocr để đọc text. Có nhiều bước preprocess để tăng tỉ lệ nhận diện thành công, đặc biệt với biển số Việt Nam có format đặc thù. Kết quả trả về sẽ là biển số đã được chuẩn hóa, hoặc rỗng nếu không detect được.
 BASE_DIR = Path(__file__).resolve().parent
 DEFAULT_MODEL_PATH = BASE_DIR.parent / "AI model" / "models" / "license_plate_detector.pt"
 

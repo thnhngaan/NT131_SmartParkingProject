@@ -5,84 +5,279 @@
   <title>Smart Parking Dashboard</title>
   <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700&display=swap" rel="stylesheet">
   <link href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css" rel="stylesheet">
-  <style>body { font-family: 'Poppins', sans-serif; }</style>
+  <script src="/socket.io/socket.io.js"></script>
+  <style>
+    body { font-family: 'Poppins', sans-serif; }
+
+    /* Mismatch Alert Modal */
+    #mismatchModal {
+      display: none;
+      position: fixed;
+      inset: 0;
+      z-index: 9999;
+      background: rgba(0,0,0,0.55);
+      backdrop-filter: blur(4px);
+      align-items: center;
+      justify-content: center;
+    }
+    #mismatchModal.active { display: flex; }
+    #mismatchModal .modal-box {
+      background: #fff;
+      border-radius: 1.5rem;
+      padding: 2rem 2.5rem;
+      max-width: 420px;
+      width: 90%;
+      box-shadow: 0 25px 60px rgba(0,0,0,0.25);
+      animation: popIn 0.25s cubic-bezier(0.34,1.56,0.64,1);
+    }
+    @keyframes popIn {
+      from { transform: scale(0.85); opacity: 0; }
+      to   { transform: scale(1);    opacity: 1; }
+    }
+
+    /* Pulse badge */
+    @keyframes pulseDot {
+      0%, 100% { opacity: 1; transform: scale(1); }
+      50%       { opacity: 0.5; transform: scale(1.4); }
+    }
+    .pulse-dot { animation: pulseDot 1.4s ease-in-out infinite; }
+
+    /* Collapse transition */
+    .collapsible { overflow: hidden; transition: max-height 0.3s ease, opacity 0.3s ease; }
+    .collapsible.collapsed { max-height: 0 !important; opacity: 0; }
+    .collapsible.expanded  { opacity: 1; }
+
+    /* Live capture image fade */
+    #plateImage { transition: opacity 0.4s ease; }
+
+    /* Scrollable table */
+    .table-scroll { overflow-y: auto; }
+    .table-scroll::-webkit-scrollbar { width: 6px; }
+    .table-scroll::-webkit-scrollbar-thumb { background: #d1d5db; border-radius: 4px; }
+  </style>
 </head>
 
 <body class="bg-gradient-to-br from-indigo-100 via-purple-100 to-pink-100 h-screen overflow-hidden">
+
+  <!-- ═══════════════════════════════════════════
+       MISMATCH ALERT MODAL
+  ════════════════════════════════════════════ -->
+  <div id="mismatchModal">
+    <div class="modal-box">
+      <div class="flex items-center gap-3 mb-4">
+        <div class="w-12 h-12 rounded-full bg-rose-100 flex items-center justify-center text-2xl flex-shrink-0">⚠️</div>
+        <div>
+          <h2 class="text-lg font-bold text-gray-800">Cảnh báo biển số không khớp!</h2>
+          <p class="text-xs text-gray-500">Phát hiện sai lệch khi xe ra khỏi bãi</p>
+        </div>
+      </div>
+
+      <div class="bg-gray-50 rounded-xl p-4 space-y-3 mb-5 text-sm">
+        <div class="flex justify-between">
+          <span class="text-gray-500">UID xe:</span>
+          <span id="alertUID" class="font-semibold text-gray-800"></span>
+        </div>
+        <div class="flex justify-between">
+          <span class="text-gray-500">Biển lúc vào:</span>
+          <span id="alertStoredPlate" class="font-semibold text-emerald-600 bg-emerald-50 px-2 py-0.5 rounded-lg"></span>
+        </div>
+        <div class="flex justify-between">
+          <span class="text-gray-500">Biển lúc ra:</span>
+          <span id="alertDetectedPlate" class="font-semibold text-rose-600 bg-rose-50 px-2 py-0.5 rounded-lg"></span>
+        </div>
+      </div>
+
+      <!-- Plate images side by side -->
+      <div class="grid grid-cols-2 gap-3 mb-5">
+        <div class="text-center">
+          <p class="text-xs text-gray-500 mb-1">Ảnh lúc vào</p>
+          <div class="h-20 bg-gray-100 rounded-lg overflow-hidden">
+            <img id="alertEntryImage" src="" alt="" class="w-full h-full object-cover" onerror="this.parentElement.innerHTML='<span class=\'text-gray-400 text-xs flex h-full items-center justify-center\'>Không có ảnh</span>'" />
+          </div>
+        </div>
+        <div class="text-center">
+          <p class="text-xs text-gray-500 mb-1">Ảnh lúc ra</p>
+          <div class="h-20 bg-gray-100 rounded-lg overflow-hidden">
+            <img id="alertExitImage" src="" alt="" class="w-full h-full object-cover" onerror="this.parentElement.innerHTML='<span class=\'text-gray-400 text-xs flex h-full items-center justify-center\'>Không có ảnh</span>'" />
+          </div>
+        </div>
+      </div>
+
+      <div class="flex gap-3">
+        <button onclick="closeMismatchModal()" class="flex-1 py-2.5 rounded-xl bg-gray-100 text-gray-700 font-semibold hover:bg-gray-200 transition text-sm">
+          Bỏ qua
+        </button>
+        <button onclick="closeMismatchModal()" class="flex-1 py-2.5 rounded-xl bg-gradient-to-r from-rose-500 to-rose-600 text-white font-semibold hover:shadow-lg transition text-sm">
+          Đã kiểm tra
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ═══════════════════════════════════════════
+       MAIN LAYOUT
+  ════════════════════════════════════════════ -->
   <div class="h-screen p-4 md:p-6">
     <div class="h-full max-w-7xl mx-auto grid grid-cols-1 md:grid-cols-12 gap-4 md:gap-6">
+
+      <!-- Sidebar -->
       <aside class="md:col-span-3 lg:col-span-2 bg-white/80 backdrop-blur rounded-3xl shadow-xl border border-white/60 p-5 flex flex-col">
         <div class="mb-8">
           <h2 class="text-2xl font-bold text-gray-800">Smart Parking</h2>
           <p id="navSubtitle" class="text-xs text-gray-500 mt-1">Loading...</p>
         </div>
         <nav class="space-y-2">
-          <button type="button" onclick="window.location.href='/dashboard'" class="w-full text-left px-4 py-3 rounded-xl bg-gradient-to-r from-indigo-500 to-purple-600 text-white font-semibold shadow">
+          <button type="button" onclick="window.location.href='/dashboard'"
+            class="w-full text-left px-4 py-3 rounded-xl bg-gradient-to-r from-indigo-500 to-purple-600 text-white font-semibold shadow">
             Dashboard
           </button>
-          <button type="button" id="analyticsNavBtn" onclick="window.location.href='/analytics'" class="w-full text-left px-4 py-3 rounded-xl text-gray-600 bg-gray-50 border border-gray-100 hover:bg-gray-100 transition hidden">
+          <button type="button" id="analyticsNavBtn" onclick="window.location.href='/analytics'"
+            class="w-full text-left px-4 py-3 rounded-xl text-gray-600 bg-gray-50 border border-gray-100 hover:bg-gray-100 transition hidden">
             Analytics
           </button>
         </nav>
         <div class="mt-auto pt-4">
-          <button type="button" onclick="logout()" class="w-full px-5 py-3 rounded-xl text-white font-semibold bg-gradient-to-r from-gray-800 to-gray-900 hover:from-gray-700 hover:to-black hover:shadow-lg transform hover:-translate-y-0.5 transition duration-300">
+          <button type="button" onclick="logout()"
+            class="w-full px-5 py-3 rounded-xl text-white font-semibold bg-gradient-to-r from-gray-800 to-gray-900 hover:from-gray-700 hover:to-black hover:shadow-lg transform hover:-translate-y-0.5 transition duration-300">
             Logout
           </button>
         </div>
       </aside>
 
+      <!-- Main -->
       <main class="md:col-span-9 lg:col-span-10 bg-white rounded-3xl shadow-xl border border-white/60 p-6 md:p-8 h-full flex flex-col min-h-0">
-        <div class="mb-6">
+
+        <!-- Header -->
+        <div class="mb-5">
           <h1 class="text-3xl md:text-4xl font-bold text-gray-800">Smart Parking Dashboard</h1>
           <p id="greetingText" class="text-gray-500 mt-1">Hello, User</p>
         </div>
-        <div id="userPanel" class="hidden flex flex-col gap-6">
 
-          <!-- Logo -->
+        <!-- USER PANEL -->
+        <div id="userPanel" class="hidden flex flex-col gap-6">
           <div class="flex justify-center items-center gap-6 mb-8">
             <img src="/images/logo_mmt-nth.png" alt="logo 1" class="w-28 md:w-32 object-contain" />
             <img src="/images/Logo ĐH Công Nghệ Thông Tin - UIT.png" alt="logo 2" class="w-28 md:w-32 object-contain" />
           </div>
-
-          <p class="text-gray-600 mb-6 text-center">
-            Today&rsquo;s parking overview
-          </p>
-
+          <p class="text-gray-600 mb-6 text-center">Today's parking overview</p>
           <div class="grid grid-cols-1 sm:grid-cols-2 gap-6 max-w-4xl mx-auto w-full">
-
             <div class="bg-gradient-to-br from-indigo-500 to-purple-600 text-white p-6 rounded-2xl shadow-lg">
               <p class="text-sm opacity-90">Vehicles entered today</p>
               <h2 id="userEnteredToday" class="text-4xl font-bold mt-3">-</h2>
             </div>
-
             <div class="bg-gradient-to-br from-indigo-500 to-purple-600 text-white p-6 rounded-2xl shadow-lg">
               <p class="text-sm opacity-90">Available slots now</p>
               <h2 id="userAvailableSlots" class="text-4xl font-bold mt-3">-</h2>
             </div>
-
           </div>
         </div>
 
         <!-- ADMIN PANEL -->
         <div id="adminPanel" class="hidden flex flex-col flex-1 min-h-0">
-          <div id="analytics" class="grid grid-cols-1 md:grid-cols-3 gap-5 mb-6"></div>
 
-          <div id="admin" class="mb-6 hidden">
-            <form id="addSlotForm" class="bg-gradient-to-r from-indigo-50 to-purple-50 border border-indigo-100 p-5 rounded-2xl flex flex-col md:flex-row gap-3">
-              <input type="text" id="slotNumber" placeholder="License Plate or Slot Number" class="p-3 rounded-xl border border-gray-200 w-full focus:outline-none focus:ring-2 focus:ring-indigo-400" required>
-              <button type="submit" class="bg-gradient-to-r from-indigo-500 to-purple-600 text-white px-6 py-3 rounded-xl font-semibold hover:shadow-lg transition duration-300">
-                Add Entry
-              </button>
-            </form>
+          <!-- Analytics cards -->
+          <div id="analytics" class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4"></div>
+
+          <!-- ── Two-column row: Live Capture  |  Add Entry ── -->
+          <div class="grid grid-cols-1 lg:grid-cols-2 gap-4 mb-4">
+
+            <!-- 📷 Live Capture Panel -->
+            <div class="bg-gray-50 border border-gray-200 rounded-2xl p-4">
+              <div class="flex items-center justify-between mb-3">
+                <h3 class="font-semibold text-gray-700 text-sm flex items-center gap-2">
+                  <span>📷</span> Latest Capture
+                </h3>
+                <span id="liveStatus"
+                  class="flex items-center gap-1.5 text-xs px-2.5 py-1 rounded-full bg-gray-200 text-gray-500 font-medium">
+                  <span class="w-2 h-2 rounded-full bg-gray-400 pulse-dot"></span>
+                  Waiting...
+                </span>
+              </div>
+
+              <div class="flex gap-4 items-start">
+                <!-- Image -->
+                <div class="flex-shrink-0">
+                  <div id="plateImageWrapper"
+                    class="w-44 h-28 bg-gray-200 rounded-xl overflow-hidden flex items-center justify-center relative">
+                    <span id="plateImagePlaceholder" class="text-gray-400 text-xs text-center px-2">No image yet</span>
+                    <img id="plateImage" src="" alt="Plate"
+                      class="hidden w-full h-full object-cover absolute inset-0" />
+                  </div>
+                </div>
+
+                <!-- Info -->
+                <div class="flex-1 space-y-2 text-sm mt-1">
+                  <div class="flex items-center gap-2">
+                    <span class="text-gray-400 text-xs w-16">UID</span>
+                    <span id="liveUID" class="font-semibold text-gray-800 truncate">-</span>
+                  </div>
+                  <div class="flex items-center gap-2">
+                    <span class="text-gray-400 text-xs w-16">Plate</span>
+                    <span id="livePlate" class="font-semibold text-gray-800">-</span>
+                  </div>
+                  <div class="flex items-center gap-2">
+                    <span class="text-gray-400 text-xs w-16">Status</span>
+                    <span id="liveStatusBadge"
+                      class="px-2 py-0.5 rounded-full text-xs font-semibold bg-gray-100 text-gray-600">-</span>
+                  </div>
+                  <div class="flex items-center gap-2">
+                    <span class="text-gray-400 text-xs w-16">Time</span>
+                    <span id="liveTime" class="text-gray-600 text-xs">-</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <!-- ➕ Add Entry (collapsible) -->
+            <div id="admin" class="hidden">
+              <div class="bg-indigo-50 border border-indigo-100 rounded-2xl overflow-hidden h-full">
+
+                <!-- Toggle header -->
+                <button type="button" onclick="toggleAddEntry()"
+                  class="w-full flex items-center justify-between px-5 py-4 font-semibold text-indigo-700 hover:bg-indigo-100 transition text-sm">
+                  <span class="flex items-center gap-2">
+                    <span id="addEntryIcon" class="text-lg transition-transform duration-300">＋</span>
+                    Add Vehicle Manually
+                  </span>
+                  <svg id="addEntryChevron"
+                    class="w-4 h-4 transition-transform duration-300 transform"
+                    fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7" />
+                  </svg>
+                </button>
+
+                <!-- Collapsible form -->
+                <div id="addEntryFormWrapper" class="collapsible collapsed" style="max-height: 200px;">
+                  <div class="px-5 pb-5 pt-1">
+                    <form id="addSlotForm" class="flex flex-col gap-3">
+                      <input type="text" id="slotNumber" placeholder="Enter license plate ">
+                      <input type="text" id="uidInput" placeholder="Enter UID (RFID Card)">
+                        <class="p-3 rounded-xl border-gray-200 w-full focus:outline-none focus:ring-2 focus:ring-indigo-400 bg-white text-sm" required>
+                      <button type="submit"
+                        class="bg-gradient-to-r from-indigo-500 to-purple-600 text-white px-6 py-3 rounded-xl font-semibold hover:shadow-lg transition duration-300 text-sm">
+                        Add to Parking
+                      </button>
+                    </form>
+                  </div>
+                </div>
+
+                <!-- Hint when collapsed -->
+                <p id="addEntryHint" class="text-xs text-indigo-400 px-5 pb-4">
+                  Click to open manual vehicle entry form
+                </p>
+              </div>
+            </div>
           </div>
 
+          <!-- Table -->
           <div class="bg-white rounded-2xl border border-gray-100 shadow-sm overflow-hidden flex-1 min-h-0">
-            <div class="h-full overflow-y-auto">
+            <div class="h-full table-scroll">
               <table class="w-full">
                 <thead class="bg-gray-50 text-gray-600 text-sm sticky top-0 z-10">
                   <tr>
                     <th class="p-4 text-left">#</th>
                     <th class="p-4 text-left">Slot / Plate</th>
+                    <th class="p-4 text-left">Image</th>
                     <th class="p-4 text-left">Status</th>
                     <th class="p-4 text-left">Date</th>
                     <th class="p-4 text-left">Time</th>
@@ -93,7 +288,7 @@
               </table>
             </div>
           </div>
-        </div>
+        </div><!-- /adminPanel -->
       </main>
     </div>
   </div>
@@ -103,25 +298,152 @@
     const token = localStorage.getItem('token');
     if (!token) window.location.href = '/login';
 
-    function formatDate(value) {
-      if (!value) return 'N/A';
-      return new Date(value).toLocaleDateString();
-    }
+    /* ── Helpers ── */
+    function formatDate(v) { return v ? new Date(v).toLocaleDateString() : 'N/A'; }
+    function formatTime(v) { return v ? new Date(v).toLocaleTimeString() : 'N/A'; }
 
-    function formatTime(value) {
-      if (!value) return 'N/A';
-      return new Date(value).toLocaleTimeString();
-    }
+    /* ── Add Entry toggle ── */
+    let addEntryOpen = false;
+    function toggleAddEntry() {
+      addEntryOpen = !addEntryOpen;
+      const wrapper  = document.getElementById('addEntryFormWrapper');
+      const chevron  = document.getElementById('addEntryChevron');
+      const icon     = document.getElementById('addEntryIcon');
+      const hint     = document.getElementById('addEntryHint');
 
-    async function loadUser() {
-      const res = await fetch('/api/auth/me', {
-        headers: { Authorization: 'Bearer ' + token }
-      });
-      if (!res.ok) {
-        localStorage.removeItem('token');
-        window.location.href = '/login';
-        throw new Error('Unauthorized');
+      if (addEntryOpen) {
+        wrapper.classList.remove('collapsed');
+        wrapper.classList.add('expanded');
+        chevron.style.transform = 'rotate(180deg)';
+        icon.textContent = '−';
+        hint.style.display = 'none';
+      } else {
+        wrapper.classList.add('collapsed');
+        wrapper.classList.remove('expanded');
+        chevron.style.transform = 'rotate(0deg)';
+        icon.textContent = '＋';
+        hint.style.display = '';
       }
+    }
+
+    /* ── Mismatch Modal ── */
+    function showMismatchModal({ uid, storedPlate, detectedPlate, entryImageUrl, exitImageUrl }) {
+      document.getElementById('alertUID').textContent           = uid || '-';
+      document.getElementById('alertStoredPlate').textContent   = storedPlate || '-';
+      document.getElementById('alertDetectedPlate').textContent = detectedPlate || '-';
+      document.getElementById('alertEntryImage').src  = entryImageUrl  || '';
+      document.getElementById('alertExitImage').src   = exitImageUrl   || '';
+      document.getElementById('mismatchModal').classList.add('active');
+    }
+
+    function closeMismatchModal() {
+      document.getElementById('mismatchModal').classList.remove('active');
+    }
+
+    // Close on backdrop click
+    document.getElementById('mismatchModal').addEventListener('click', function(e) {
+      if (e.target === this) closeMismatchModal();
+    });
+
+    /* ── Load latest capture from API ── */
+    async function loadLatestCapture() {
+      try {
+        const res = await fetch('/api/parking', { headers: { Authorization: 'Bearer ' + token } });
+        const slots = await res.json();
+        if (slots && slots.length > 0) {
+          const latestRecord = slots[0]; // Most recent record
+          console.log('[Dashboard] Loaded latest record from API:', latestRecord);
+          updateLiveCapture(latestRecord);
+        }
+      } catch (e) {
+        console.error('[Dashboard] Failed to load latest capture:', e);
+      }
+    }
+
+    /* ── Live Capture updater ── */
+    function updateLiveCapture(record) {
+      if (!record) {
+        console.warn('[Dashboard] updateLiveCapture called with empty record');
+        return;
+      }
+
+      const img         = document.getElementById('plateImage');
+      const placeholder = document.getElementById('plateImagePlaceholder');
+      const isIn        = (record.status || 'IN') === 'IN';
+
+      console.log('[Dashboard] ═══ UPDATING LIVE CAPTURE ═══');
+      console.log('[Dashboard] Record:', {
+        uid: record.uid,
+        status: record.status,
+        plate: record.slotNumber,
+        hasImageUrl: !!record.imageUrl,
+        imageUrl: record.imageUrl
+      });
+
+      // Image
+      if (record.imageUrl) {
+        console.log('[Dashboard] Setting image source to:', record.imageUrl);
+        img.src = record.imageUrl;
+        img.onerror = function() {
+          console.error('[Dashboard] Image failed to load:', record.imageUrl);
+          this.classList.add('hidden');
+          placeholder.classList.remove('hidden');
+          placeholder.textContent = 'Image failed to load';
+        };
+        img.onload = function() {
+          console.log('[Dashboard] Image loaded successfully:', record.imageUrl);
+          this.classList.remove('hidden');
+          placeholder.classList.add('hidden');
+        };
+        img.classList.remove('hidden');
+        placeholder.classList.add('hidden');
+      } else {
+        console.warn('[Dashboard] No imageUrl in record - keeping placeholder');
+        img.classList.add('hidden');
+        placeholder.classList.remove('hidden');
+        placeholder.textContent = 'No image yet';
+      }
+
+      // Info fields
+      document.getElementById('liveUID').textContent   = record.uid || '-';
+      document.getElementById('livePlate').textContent = record.slotNumber || '-';
+      document.getElementById('liveTime').textContent  = isIn
+        ? formatTime(record.entryTime)
+        : formatTime(record.exitTime);
+
+      // Status badge
+      const badge = document.getElementById('liveStatusBadge');
+      badge.textContent  = isIn ? 'IN' : 'OUT';
+      badge.className    = `px-2 py-0.5 rounded-full text-xs font-semibold ${
+        isIn ? 'bg-emerald-100 text-emerald-700' : 'bg-rose-100 text-rose-700'}`;
+
+      // Top status pill
+      const pill = document.getElementById('liveStatus');
+      pill.innerHTML = `
+        <span class="w-2 h-2 rounded-full ${isIn ? 'bg-emerald-400' : 'bg-rose-400'} pulse-dot"></span>
+        ${isIn ? '🟢 Entry' : '🔴 Exit'}`;
+      pill.className = `flex items-center gap-1.5 text-xs px-2.5 py-1 rounded-full font-medium ${
+        isIn ? 'bg-emerald-100 text-emerald-700' : 'bg-rose-100 text-rose-700'}`;
+
+      console.log('[Dashboard] ═══ LIVE CAPTURE UPDATED ═══');
+
+      // Plate mismatch warning
+      if (record.plateMismatch) {
+        console.log('[Dashboard] Plate mismatch detected - showing modal');
+        showMismatchModal({
+          uid:            record.uid,
+          storedPlate:    record.storedPlate,
+          detectedPlate:  record.detectedPlate,
+          entryImageUrl:  record.entryImageUrl || '',
+          exitImageUrl:   record.imageUrl      || '',
+        });
+      }
+    }
+
+    /* ── API calls ── */
+    async function loadUser() {
+      const res = await fetch('/api/auth/me', { headers: { Authorization: 'Bearer ' + token } });
+      if (!res.ok) { localStorage.removeItem('token'); window.location.href = '/login'; throw new Error('Unauthorized'); }
       user = await res.json();
       const displayName = user.username || user.name || user.email || 'User';
       document.getElementById('greetingText').textContent = `Hello, ${displayName}`;
@@ -129,110 +451,135 @@
     }
 
     async function loadTodaySummaryForUser() {
-      const stateEl = document.getElementById('userSummaryState');
       try {
-        const res = await fetch('/api/parking/today-summary', {
-          headers: { Authorization: 'Bearer ' + token }
-        });
+        const res  = await fetch('/api/parking/today-summary', { headers: { Authorization: 'Bearer ' + token } });
         const data = await res.json();
-        if (!res.ok) throw new Error(data.message || 'Failed to load summary');
-        document.getElementById('userEnteredToday').textContent = data.enteredToday;
+        if (!res.ok) throw new Error(data.message || 'Failed');
+        document.getElementById('userEnteredToday').textContent  = data.enteredToday;
         document.getElementById('userAvailableSlots').textContent = data.available;
-        stateEl.textContent = '';
-      } catch (e) {
-        stateEl.textContent = e.message || 'Could not refresh today’s summary.';
-      }
+      } catch (e) { console.error(e); }
     }
 
     async function loadAnalytics() {
-      const res = await fetch('/api/parking/analytics', {
-        headers: { Authorization: 'Bearer ' + token }
-      });
+      const res  = await fetch('/api/parking/analytics', { headers: { Authorization: 'Bearer ' + token } });
       const data = await res.json();
       document.getElementById('analytics').innerHTML = `
-        <div class="bg-gradient-to-r from-indigo-500 to-indigo-600 text-white p-6 rounded-2xl shadow-md">
+        <div class="bg-gradient-to-r from-indigo-500 to-indigo-600 text-white p-5 rounded-2xl shadow-md">
           <p class="text-sm opacity-90">Total Capacity</p>
           <h2 class="text-3xl font-bold">${data.total}</h2>
         </div>
-        <div class="bg-gradient-to-r from-indigo-500 to-indigo-600 text-white p-6 rounded-2xl shadow-md">
+        <div class="bg-gradient-to-r from-indigo-500 to-indigo-600 text-white p-5 rounded-2xl shadow-md">
           <p class="text-sm opacity-90">Occupied</p>
           <h2 class="text-3xl font-bold">${data.occupied}</h2>
         </div>
-        <div class="bg-gradient-to-r from-indigo-500 to-indigo-600 text-white p-6 rounded-2xl shadow-md">
+        <div class="bg-gradient-to-r from-emerald-400 to-teal-500 text-white p-5 rounded-2xl shadow-md">
           <p class="text-sm opacity-90">Available</p>
           <h2 class="text-3xl font-bold">${data.available}</h2>
-        </div>
-      `;
+        </div>`;
     }
 
     async function loadSlots() {
-      const res = await fetch('/api/parking', {
-        headers: { Authorization: 'Bearer ' + token }
-      });
+      const res   = await fetch('/api/parking', { headers: { Authorization: 'Bearer ' + token } });
       const slots = await res.json();
-      const slotsDiv = document.getElementById('slots');
-      slotsDiv.innerHTML = slots.map((slot, index) => `
-        <tr class="border-b hover:bg-gray-50 transition">
-          <td class="p-4">${index + 1}</td>
-          <td class="p-4 font-semibold">${slot.slotNumber}</td>
-          <td class="p-4">
-            <span class="${(slot.status || 'IN') === 'IN' ? 'bg-emerald-100 text-emerald-700' : 'bg-rose-100 text-rose-700'} px-3 py-1 rounded-full text-sm font-semibold">
-              ${(slot.status || 'IN') === 'IN' ? 'IN' : 'OUT'}
-            </span>
-          </td>
-          <td class="p-4 text-gray-600">${formatDate(slot.entryTime)}</td>
-          <td class="p-4 text-gray-600">${formatTime(slot.entryTime)}</td>
-          <td class="p-4 text-center">
-            <button type="button" onclick="deleteSlot('${slot._id}')" class="bg-red-500 hover:bg-red-600 text-white px-4 py-1 rounded-lg">Delete</button>
-          </td>
-        </tr>
-      `).join('');
+      document.getElementById('slots').innerHTML = slots.map((slot, i) => {
+        const isIn = (slot.status || 'IN') === 'IN';
+        const thumb = slot.imageUrl
+          ? `<img src="${slot.imageUrl}" alt="plate"
+               class="w-14 h-9 object-cover rounded-lg border border-gray-200 cursor-pointer hover:opacity-80 transition"
+               onclick="previewImage('${slot.imageUrl}')" />`
+          : `<span class="text-gray-300 text-xs">—</span>`;
+        return `
+          <tr class="border-b hover:bg-gray-50 transition">
+            <td class="p-4 text-gray-500">${i + 1}</td>
+            <td class="p-4 font-semibold">${slot.slotNumber}</td>
+            <td class="p-4">${thumb}</td>
+            <td class="p-4">
+              <span class="${isIn ? 'bg-emerald-100 text-emerald-700' : 'bg-rose-100 text-rose-700'} px-3 py-1 rounded-full text-sm font-semibold">
+                ${isIn ? 'IN' : 'OUT'}
+              </span>
+            </td>
+            <td class="p-4 text-gray-600 text-sm">${formatDate(slot.entryTime)}</td>
+            <td class="p-4 text-gray-600 text-sm">${formatTime(slot.entryTime)}</td>
+            <td class="p-4 text-center">
+              <button type="button" onclick="deleteSlot('${slot._id}')"
+                class="bg-red-500 hover:bg-red-600 text-white px-4 py-1.5 rounded-lg text-sm transition">Delete</button>
+            </td>
+          </tr>`;
+      }).join('');
     }
 
+    /* ── Image preview (click thumbnail) ── */
+    function previewImage(src) {
+      const overlay = document.createElement('div');
+      overlay.style.cssText = 'position:fixed;inset:0;z-index:99999;background:rgba(0,0,0,0.8);display:flex;align-items:center;justify-content:center;cursor:zoom-out;';
+      overlay.innerHTML = `<img src="${src}" style="max-width:90vw;max-height:90vh;border-radius:1rem;box-shadow:0 20px 60px rgba(0,0,0,0.5);" />`;
+      overlay.addEventListener('click', () => document.body.removeChild(overlay));
+      document.body.appendChild(overlay);
+    }
+
+    /* ── Delete ── */
     async function deleteSlot(id) {
       if (!confirm('Mark this car as exited and free the slot?')) return;
-      const res = await fetch(`/api/parking/${id}`, {
-        method: 'DELETE',
-        headers: { Authorization: 'Bearer ' + token }
-      });
+      const res  = await fetch(`/api/parking/${id}`, { method: 'DELETE', headers: { Authorization: 'Bearer ' + token } });
       const data = await res.json();
-      if (!res.ok) {
-        alert(data.message || 'Unable to delete slot');
-        return;
-      }
+      if (!res.ok) { alert(data.message || 'Unable to delete slot'); return; }
       loadSlots();
       loadAnalytics();
     }
 
+    /* ── Add Slot form ── */
     const addForm = document.getElementById('addSlotForm');
     if (addForm) {
       addForm.addEventListener('submit', async (e) => {
         e.preventDefault();
         const slotNumber = document.getElementById('slotNumber').value.trim();
-        const res = await fetch('/api/parking', {
+        const uid = document.getElementById('uidInput').value.trim();
+        
+        const res  = await fetch('/api/parking', {
           method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            Authorization: 'Bearer ' + token
-          },
-          body: JSON.stringify({ slotNumber })
+          headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + token },
+          body: JSON.stringify({ slotNumber, uid})
         });
         const data = await res.json();
-        if (!res.ok) {
-          alert(data.message || 'Unable to add entry');
-          return;
-        }
+        if (!res.ok) { alert(data.message || 'Unable to add entry'); return; }
+        console.log('[Dashboard] Entry added successfully:', data);
         document.getElementById('slotNumber').value = '';
         loadSlots();
         loadAnalytics();
+        loadLatestCapture(); // Update Latest Capture section
       });
     }
 
-    function logout() {
-      localStorage.removeItem('token');
-      window.location.href = '/';
+    /* ── Logout ── */
+    function logout() { localStorage.removeItem('token'); window.location.href = '/'; }
+
+    /* ── Socket.IO ── */
+    function initSocket() {
+      try {
+        const socket = io();
+        socket.on('connect', () => {
+          console.log('[Socket] ✅ Connected:', socket.id);
+          document.getElementById('liveStatus').style.opacity = '1';
+        });
+        socket.on('disconnect', () => {
+          console.warn('[Socket] ❌ Disconnected - will use polling fallback');
+          document.getElementById('liveStatus').style.opacity = '0.5';
+        });
+        socket.on('error', (error) => {
+          console.error('[Socket] Error:', error);
+        });
+        socket.on('parking_update', (record) => {
+          console.log('[Socket] 📡 parking_update event received:', record);
+          updateLiveCapture(record);
+          loadSlots();
+          loadAnalytics();
+        });
+      } catch (err) {
+        console.warn('[Socket] Socket.IO initialization error:', err.message);
+      }
     }
 
+    /* ── Init ── */
     loadUser()
       .then((u) => {
         const isAdmin = u.role === 'admin';
@@ -242,12 +589,26 @@
           document.getElementById('adminPanel').classList.remove('hidden');
           document.getElementById('analyticsNavBtn').classList.remove('hidden');
           document.getElementById('admin').classList.remove('hidden');
+          
+          // Load initial data
+          console.log('[Dashboard] Loading initial data...');
           loadAnalytics();
           loadSlots();
-          setInterval(() => {
+          loadLatestCapture(); // Initial load of Latest Capture
+          
+          // Initialize Socket.IO
+          initSocket();
+          
+          // Fallback polling: update Latest Capture every 5 seconds
+          // This ensures data updates even if Socket.IO fails
+          const pollingInterval = setInterval(() => {
+            console.log('[Dashboard] 🔄 Polling for latest data...');
+            loadLatestCapture();
             loadSlots();
             loadAnalytics();
           }, 5000);
+          
+          console.log('[Dashboard] Admin panel initialized with polling interval:', pollingInterval);
         } else {
           document.getElementById('userPanel').classList.remove('hidden');
           loadTodaySummaryForUser();

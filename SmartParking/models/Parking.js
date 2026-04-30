@@ -30,6 +30,10 @@ const parkingSchema = new mongoose.Schema({
     type: Date,
     default: Date.now,
   },
+  imageUrl: {
+    type: String,
+    default: null,
+  },
 }, {
   versionKey: false,
 });

@@ -4,7 +4,7 @@ const crypto = require('crypto');
 const User = require('../models/User');
 const PendingAdmin = require('../models/PendingAdmin');
 const { sendAdminVerificationPin } = require('../services/email');
-
+// File xác thực người dùng, bao gồm đăng ký (với cơ chế PIN cho admin), đăng nhập, đăng xuất và lấy thông tin người dùng hiện tại. Sử dụng bcrypt để hash mật khẩu và PIN, JWT để tạo token xác thực. Khi một admin mới đăng ký, sẽ tạo một bản ghi PendingAdmin với PIN và gửi email đến địa chỉ tổ chức để xác nhận. Nếu PIN hợp lệ và chưa hết hạn, tài khoản admin sẽ được tạo.
 const PIN_EXPIRY_MINUTES = 5;
 
 function generatePin() {
