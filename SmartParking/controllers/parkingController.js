@@ -62,6 +62,16 @@ async function processExitRecord({ activeRecord, detectedPlate, imageUrl, exitTi
       `stored=${normalizedStoredPlate}, detected=${normalizedDetectedPlate}`
     );
     plateMismatch = true;
+  }if (
+    (normalizedStoredPlate   == 'UNKNOWN' ||
+    normalizedDetectedPlate == 'UNKNOWN' )&&
+    normalizedStoredPlate   !== normalizedDetectedPlate
+  ) {
+    console.warn(
+      `[Parking] ⚠️  Plate mismatch for UID ${activeRecord.uid}: ` +
+      `stored=${normalizedStoredPlate}, detected=${normalizedDetectedPlate}`
+    );
+    plateMismatch = true;
   }
 
   // Preserve entry image before overwriting

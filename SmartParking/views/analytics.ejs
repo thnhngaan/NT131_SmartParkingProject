@@ -65,41 +65,21 @@
 
         <section class="bg-white rounded-2xl border border-gray-100 shadow-sm p-5">
           <div class="flex items-center justify-between gap-4 mb-4">
-            <h2 class="text-xl font-semibold text-gray-800">Predicted Traffic (Next 24 Hours)</h2>
-            <button id="refreshPredictionBtn" class="text-sm font-semibold px-4 py-2 rounded-lg bg-indigo-50 text-indigo-600 hover:bg-indigo-100 transition">
-              Refresh
-            </button>
+            <h2 class="text-xl font-semibold text-gray-800">AI Assistant</h2>
           </div>
 
-          <div class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
-            <div class="bg-indigo-50 rounded-xl p-4 border border-indigo-100">
-              <p class="text-sm text-indigo-700">Max Predicted Entries (IN)</p>
-              <p id="maxPrediction" class="text-2xl font-bold text-indigo-900">-</p>
-            </div>
-            <div class="bg-purple-50 rounded-xl p-4 border border-purple-100">
-              <p class="text-sm text-purple-700">Average Predicted Entries (IN)</p>
-              <p id="avgPrediction" class="text-2xl font-bold text-purple-900">-</p>
-            </div>
-            <div class="bg-rose-50 rounded-xl p-4 border border-rose-100">
-              <p class="text-sm text-rose-700">Peak Entry Hour (IN)</p>
-              <p id="peakHour" class="text-2xl font-bold text-rose-900">-</p>
+          <div class="mb-4">
+            <label for="aiPrompt" class="block text-sm font-medium text-gray-700 mb-2">Ask about parking data, analytics, or usage patterns:</label>
+            <div class="flex gap-2">
+              <input type="text" id="aiPrompt" class="flex-1 px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500" placeholder="e.g., What are the peak hours for parking?">
+              <button id="askAIButton" class="px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition">
+                Ask AI
+              </button>
             </div>
           </div>
 
-          <p id="predictionState" class="text-sm text-gray-500 mb-3">Loading prediction data...</p>
-          <div class="grid grid-cols-1 xl:grid-cols-2 gap-6 mb-6">
-            <div class="h-72">
-              <p class="text-sm font-semibold text-emerald-700 mb-2">Predicted Entries (Next 24h)</p>
-              <canvas id="predictionInChart"></canvas>
-            </div>
-            <div class="h-72">
-              <p class="text-sm font-semibold text-rose-700 mb-2">Predicted Exits (Next 24h)</p>
-              <canvas id="predictionOutChart"></canvas>
-            </div>
-          </div>
-          <div class="h-80">
-            <p class="text-sm font-semibold text-indigo-700 mb-2">Combined IN vs OUT Prediction</p>
-            <canvas id="predictionCombinedChart"></canvas>
+          <div id="aiResponse" class="bg-gray-50 rounded-lg p-4 min-h-64 max-h-96 overflow-y-auto">
+            <p class="text-gray-500 text-sm">AI responses will appear here...</p>
           </div>
         </section>
       </main>
@@ -110,9 +90,6 @@
     let user;
     let historicalInChart;
     let historicalOutChart;
-    let predictionInChart;
-    let predictionOutChart;
-    let predictionCombinedChart;
 
     const token = localStorage.getItem('token');
     if (!token) window.location.href = '/login';
@@ -222,99 +199,46 @@
       }
     }
 
-    function renderPredictionCharts(data) {
-      const labels = data.map((d) => formatHourLabel(d.ds));
-      const inValues = data.map((d) => Number(d.in) || 0);
-      const outValues = data.map((d) => Number(d.out) || 0);
-      const inMaxVal = Math.max(...inValues, 0);
+    async function askAI() {
+      const prompt = document.getElementById('aiPrompt').value.trim();
+      const responseDiv = document.getElementById('aiResponse');
+      const button = document.getElementById('askAIButton');
 
-      predictionInChart = renderSingleFlowChart('predictionInChart', predictionInChart, labels, inValues, 'Predicted Entries (IN)', '#10b981', 'rgba(16,185,129,0.12)');
-      predictionOutChart = renderSingleFlowChart('predictionOutChart', predictionOutChart, labels, outValues, 'Predicted Exits (OUT)', '#f43f5e', 'rgba(244,63,94,0.12)');
-
-      const ctx = document.getElementById('predictionCombinedChart').getContext('2d');
-      if (predictionCombinedChart) predictionCombinedChart.destroy();
-
-      predictionCombinedChart = new Chart(ctx, {
-        type: 'line',
-        data: {
-          labels,
-          datasets: [
-            {
-              label: 'Predicted Entries (IN)',
-              data: inValues,
-              borderColor: '#10b981',
-              backgroundColor: 'rgba(16,185,129,0.1)',
-              fill: false,
-              tension: 0.3,
-              pointRadius: inValues.map((v) => (v === inMaxVal ? 5 : 3)),
-              pointBackgroundColor: inValues.map((v) => (v === inMaxVal ? '#065f46' : '#10b981'))
-            },
-            {
-              label: 'Predicted Exits (OUT)',
-              data: outValues,
-              borderColor: '#f43f5e',
-              backgroundColor: 'rgba(244,63,94,0.1)',
-              fill: false,
-              tension: 0.3,
-              pointRadius: 3
-            }
-          ]
-        },
-        options: {
-          responsive: true,
-          maintainAspectRatio: false,
-          plugins: {
-            legend: { display: true },
-            tooltip: { mode: 'index', intersect: false }
-          },
-          scales: {
-            x: { title: { display: true, text: 'Time' } },
-            y: { beginAtZero: true, title: { display: true, text: 'Predicted Vehicles' }, ticks: { precision: 0 } }
-          }
-        }
-      });
-    }
-
-    function updatePredictionStats(data) {
-      if (!data.length) {
-        setText('maxPrediction', '-');
-        setText('avgPrediction', '-');
-        setText('peakHour', '-');
+      if (!prompt) {
+        responseDiv.innerHTML = '<p class="text-red-500">Please enter a question.</p>';
         return;
       }
 
-      const values = data.map((d) => Number(d.in) || 0);
-      const maxValue = Math.max(...values, 0);
-      const avgValue = values.length ? (values.reduce((a, b) => a + b, 0) / values.length) : 0;
-      const peakIndex = values.indexOf(maxValue);
-      const peak = data[peakIndex];
+      button.disabled = true;
+      button.textContent = 'Thinking...';
+      responseDiv.innerHTML = '<p class="text-gray-500">Getting AI response...</p>';
 
-      setText('maxPrediction', maxValue.toFixed(2));
-      setText('avgPrediction', avgValue.toFixed(2));
-      setText('peakHour', formatHourLabel(peak.ds));
-    }
-
-    async function loadPredictionData() {
       try {
-        setText('predictionState', 'Loading prediction data...');
-        const res = await fetch('http://127.0.0.1:5000/predict');
-        if (!res.ok) throw new Error('Prediction service unavailable');
-        const data = await res.json();
-        if (!Array.isArray(data)) throw new Error('Invalid prediction response format');
-        const valid = data.every((item) => item && item.ds !== undefined && item.in !== undefined && item.out !== undefined);
-        if (!valid) throw new Error('Prediction response missing IN/OUT fields');
+        const res = await fetch('/api/ai/assistant', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: 'Bearer ' + token
+          },
+          body: JSON.stringify({ prompt })
+        });
 
-        renderPredictionCharts(data);
-        updatePredictionStats(data);
-        setText('predictionState', 'Prediction loaded successfully.');
+        if (!res.ok) throw new Error('Failed to get AI response');
+
+        const data = await res.json();
+        responseDiv.innerHTML = `<p class="text-gray-800 whitespace-pre-wrap">${data.response}</p>`;
       } catch (err) {
-        setText('predictionState', `${err.message || 'Failed to load prediction data.'} Make sure Flask AI service is running on port 5000.`);
-        renderPredictionCharts([]);
-        updatePredictionStats([]);
+        responseDiv.innerHTML = `<p class="text-red-500">Error: ${err.message || 'Failed to get AI response'}</p>`;
+      } finally {
+        button.disabled = false;
+        button.textContent = 'Ask AI';
       }
     }
 
-    document.getElementById('refreshPredictionBtn').addEventListener('click', loadPredictionData);
+    document.getElementById('askAIButton').addEventListener('click', askAI);
+    document.getElementById('aiPrompt').addEventListener('keypress', (e) => {
+      if (e.key === 'Enter') askAI();
+    });
 
     const dateInput = document.getElementById('historyDate');
     const today = new Date();
@@ -330,7 +254,7 @@
 
     loadUser().then((u) => {
       if (!u) return;
-      return Promise.all([loadHistoricalData(todayValue), loadPredictionData()]);
+      loadHistoricalData(todayValue);
     });
   </script>
 </body>

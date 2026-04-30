@@ -26,9 +26,11 @@ connectDB();
 
 const authRoutes = require('./routes/auth');
 const parkingRoutes = require('./routes/parking');
+const aiRoutes = require('./routes/ai');
 
 app.use('/api/auth', authRoutes);
 app.use('/api/parking', parkingRoutes);
+app.use('/api/ai', aiRoutes);
 
 // Frontend routes
 app.get('/', (req, res) => res.render('index'));

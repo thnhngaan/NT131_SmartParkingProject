@@ -6,6 +6,7 @@ from datetime import datetime, timedelta, timezone
 import logging
 import traceback
 from flask_cors import CORS
+import numpy as np
 
 # ===== CONFIG =====
 logging.basicConfig(level=logging.DEBUG)
@@ -15,10 +16,9 @@ app = Flask(__name__)
 CORS(app)
 
 PREDICTION_PERIODS = 24
-MIN_ROWS_FOR_PROPHET = 2
-DEFAULT_BASELINE = 0.0
+MIN_ROWS_FOR_PROPHET = 6   # ⚠️ tăng lên để tránh đoán bậy
+MAX_CAPACITY = 300         # ⚠️ sức chứa bãi xe
 
-# 🇻🇳 Timezone VN
 VN_TZ = timezone(timedelta(hours=7))
 
 # ===== DATABASE =====
@@ -26,44 +26,45 @@ def get_collection():
     try:
         client = MongoClient("mongodb://localhost:27017/", serverSelectionTimeoutMS=3000)
         client.server_info()
-        return client["smartparking"]["parkings"]  # ✅ FIXED
+        return client["smartparking"]["parkings"]
     except Exception as e:
         logger.error(f"MongoDB connection failed: {e}")
         return None
 
 
-# ===== BUILD FLOW (FIXED LOGIC) =====
+# ===== BUILD FLOW =====
 def _build_flow_hourly_df(raw_records):
     if not raw_records:
         return pd.DataFrame(columns=["ds", "in", "out"])
 
     df = pd.DataFrame(raw_records)
 
-    if df.empty or "status" not in df.columns:
+    if df.empty:
         return pd.DataFrame(columns=["ds", "in", "out"])
 
     df["entryTime"] = pd.to_datetime(df.get("entryTime"), errors="coerce", utc=True)
     df["exitTime"] = pd.to_datetime(df.get("exitTime"), errors="coerce", utc=True)
 
     # IN
-    in_df = df[df["status"] == "IN"].copy()
-    in_df = in_df.dropna(subset=["entryTime"])
+    in_df = df.dropna(subset=["entryTime"]).copy()
     in_df["ds"] = in_df["entryTime"].dt.tz_convert(None).dt.floor("h")
     in_df = in_df["ds"].value_counts().rename_axis("ds").reset_index(name="in")
 
     # OUT
-    out_df = df[df["status"] == "OUT"].copy()
-    out_df = out_df.dropna(subset=["exitTime"])
+    out_df = df.dropna(subset=["exitTime"]).copy()
     out_df["ds"] = out_df["exitTime"].dt.tz_convert(None).dt.floor("h")
     out_df = out_df["ds"].value_counts().rename_axis("ds").reset_index(name="out")
 
     flow_df = pd.merge(in_df, out_df, how="outer", on="ds").fillna(0)
 
-    if flow_df.empty:
-        return pd.DataFrame(columns=["ds", "in", "out"])
-
     flow_df["in"] = flow_df["in"].astype(int)
     flow_df["out"] = flow_df["out"].astype(int)
+
+    # 🚨 lọc dữ liệu bất thường (anti-spam test)
+    flow_df = flow_df[
+        (flow_df["in"] <= 100) &
+        (flow_df["out"] <= 100)
+    ]
 
     return flow_df.sort_values("ds")
 
@@ -80,12 +81,14 @@ def get_data(days=7):
         cursor = col.find(
             {
                 "createdAt": {"$gte": cutoff},
-                "status": {"$in": ["IN", "OUT"]}
+                "$or": [
+                    {"entryTime": {"$ne": None}},
+                    {"exitTime": {"$ne": None}}
+                ]
             },
             {
                 "entryTime": 1,
                 "exitTime": 1,
-                "status": 1,
                 "_id": 0
             }
         )
@@ -108,10 +111,14 @@ def _predict_single_flow(flow_df, target_col):
     train = flow_df[["ds", target_col]].rename(columns={target_col: "y"}).copy()
     train["ds"] = pd.to_datetime(train["ds"])
     train["y"] = pd.to_numeric(train["y"], errors="coerce")
+
     train = train.dropna()
 
     if len(train) < MIN_ROWS_FOR_PROPHET:
         return None
+
+    # 🔥 log scale để giảm spike
+    train["y"] = np.log1p(train["y"])
 
     model = Prophet(daily_seasonality=True, weekly_seasonality=False)
     model.fit(train)
@@ -119,7 +126,14 @@ def _predict_single_flow(flow_df, target_col):
     future = model.make_future_dataframe(periods=PREDICTION_PERIODS, freq="h")
     forecast = model.predict(future)[["ds", "yhat"]].tail(PREDICTION_PERIODS)
 
-    forecast["yhat"] = forecast["yhat"].clip(lower=0).round().astype(int)
+    # 🔥 inverse log
+    forecast["yhat"] = np.expm1(forecast["yhat"])
+
+    # 🔥 clamp theo sức chứa
+    forecast["yhat"] = forecast["yhat"].clip(lower=0, upper=MAX_CAPACITY)
+
+    forecast["yhat"] = forecast["yhat"].round().astype(int)
+
     return forecast
 
 
@@ -138,8 +152,8 @@ def _safe_baseline_predictions(flow_df):
 
     result = pd.DataFrame({
         "ds": future_dates,
-        "in": [mean_in] * PREDICTION_PERIODS,
-        "out": [mean_out] * PREDICTION_PERIODS
+        "in": [min(mean_in, MAX_CAPACITY)] * PREDICTION_PERIODS,
+        "out": [min(mean_out, MAX_CAPACITY)] * PREDICTION_PERIODS
     })
 
     result["ds"] = result["ds"].dt.strftime("%Y-%m-%d %H:%M:%S")
@@ -173,6 +187,7 @@ def predict():
         })
 
         merged["ds"] = merged["ds"].dt.strftime("%Y-%m-%d %H:%M:%S")
+
         return jsonify(merged.to_dict(orient="records"))
 
     except Exception:
@@ -180,7 +195,7 @@ def predict():
         return jsonify(_safe_baseline_predictions(None))
 
 
-# ===== HISTORY (REAL DATA, NOT AGGREGATED) =====
+# ===== HISTORY =====
 @app.route('/history')
 def history():
     try:
@@ -204,7 +219,6 @@ def history():
                 "slotNumber": 1,
                 "entryTime": 1,
                 "exitTime": 1,
-                "status": 1,
                 "_id": 0
             }
         )

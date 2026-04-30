@@ -13,6 +13,7 @@
   "license": "ISC",
   "type": "commonjs",
   "dependencies": {
+    "@google/genai": "^1.51.0",
     "autoprefixer": "^10.4.27",
     "axios": "^1.15.2",
     "bcryptjs": "^3.0.3",
