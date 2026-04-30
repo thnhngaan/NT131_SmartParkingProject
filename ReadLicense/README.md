@@ -1,65 +1,66 @@
-# Automatic Number Plate Recognition using YOLOv11
+# Nhận Dạng Biển Số Xe Tự Động Sử Dụng YOLOv11
 
-- [Automatic Number Plate Recognition using YOLOv11](#automatic-number-plate-recognition-using-yolov11)
-  - [Data](#data)
-  - [Model](#model)
-  - [Dependencies](#dependencies)
-  - [Project Setup](#project-setup)
+- [Nhận Dạng Biển Số Xe Tự Động Sử Dụng YOLOv11](#nhận-dạng-biển-số-xe-tự-động-sử-dụng-yolov11)
+  - [Dữ Liệu](#dữ-liệu)
+  - [Mô Hình](#mô-hình)
+  - [Các Phụ Thuộc](#các-phụ-thuộc)
+  - [Thiết Lập Dự Án](#thiết-lập-dự-án)
 
-## Data
+## Dữ Liệu
 
-The **License Plate Recognition** dataset used to train this model can be found [here](https://universe.roboflow.com/roboflow-universe-projects/license-plate-recognition-rxg4e/dataset/4).
+Bộ dữ liệu **Nhận Dạng Biển Số Xe** được sử dụng để huấn luyện mô hình này có thể tìm thấy [ở đây](https://universe.roboflow.com/roboflow-universe-projects/license-plate-recognition-rxg4e/dataset/4).
 
-The video used in this project can be found [here](https://www.pexels.com/video/cars-are-driving-on-a-snowy-road-in-the-city-9487043/).
+Video được sử dụng trong dự án này có thể tìm thấy [ở đây](https://www.pexels.com/video/cars-are-driving-on-a-snowy-road-in-the-city-9487043/).
 
-## Model
+## Mô Hình
 
-A license plate detector model is used to detect the license plates. The model was trained using YOLOv11 for **100** epochs with **21173** images of shape `640x640`.
+Một mô hình dò biển số xe được sử dụng để phát hiện các biển số. Mô hình được huấn luyện bằng YOLOv11 cho **100** epoch với **21173** hình ảnh có kích thước `640x640`.
 
-The trained model is available [here](./models/license_plate_detector.pt).
+Mô hình đã được huấn luyện có sẵn [ở đây](./models/license_plate_detector.pt).
 
-## Dependencies
+## Các Phụ Thuộc
 
 - Python 3.x
 - opencv_contrib_python
 - opencv_python
 - ultralytics
 
-## Project Setup
+## Thiết Lập Dự Án
 
-- Make a virtual environment using the following command:
+- Tạo môi trường ảo bằng lệnh sau:
 
   ```bash
   python3 -m venv myenv
   ```
 
-  Replace `myenv` with the name you want for your virtual environment. This will create a folder named myenv in your current directory containing the virtual environment files.
+  Thay thế `myenv` bằng tên bạn muốn cho môi trường ảo của mình. Điều này sẽ tạo một thư mục có tên myenv trong thư mục hiện tại của bạn chứa các tệp môi trường ảo.
 
-- Activate the virtual environment:
+- Kích hoạt môi trường ảo:
 
   ```bash
   source myenv/bin/activate
   ```
 
-  Remember to replace `myenv` with the actual name of the environment created in the previous step.
+  Hãy nhớ thay thế `myenv` bằng tên thực tế của môi trường được tạo trong bước trước.
 
-- Navigate to the root directory of the project:
+- Điều hướng đến thư mục gốc của dự án:
 
   ```bash
   cd path/to/the/project
   ```
 
-- Install dependencies:
+- Cài đặt các phụ thuộc:
   ```bash
   pip install -r requirements.txt
   ```
-- To execute the script, run:
+
+- Để thực thi tập lệnh, chạy:
 
   ```bash
   python3 main.py
   ```
 
-- When you're done working in the virtual environment, you can deactivate it by running:
+- Khi bạn hoàn thành việc làm việc trong môi trường ảo, bạn có thể vô hiệu hóa nó bằng cách chạy:
   ```bash
   deactivate
   ```
