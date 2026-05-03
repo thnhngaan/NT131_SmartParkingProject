@@ -69,9 +69,9 @@
           </div>
 
           <div class="mb-4">
-            <label for="aiPrompt" class="block text-sm font-medium text-gray-700 mb-2">Ask about parking data, analytics, or usage patterns:</label>
+            <label for="aiPrompt" class="block text-sm font-medium text-gray-700 mb-2">Ask something ^^ </label>
             <div class="flex gap-2">
-              <input type="text" id="aiPrompt" class="flex-1 px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500" placeholder="e.g., What are the peak hours for parking?">
+              <input type="text" id="aiPrompt" class="flex-1 px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500" placeholder="" />
               <button id="askAIButton" class="px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition">
                 Ask AI
               </button>
@@ -226,7 +226,7 @@
         if (!res.ok) throw new Error('Failed to get AI response');
 
         const data = await res.json();
-        responseDiv.innerHTML = `<p class="text-gray-800 whitespace-pre-wrap">${data.response}</p>`;
+        responseDiv.innerHTML = `<p class="text-gray-800 whitespace-pre-wrap">${data.data}</p>`;
       } catch (err) {
         responseDiv.innerHTML = `<p class="text-red-500">Error: ${err.message || 'Failed to get AI response'}</p>`;
       } finally {
