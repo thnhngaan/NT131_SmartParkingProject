@@ -2,6 +2,7 @@
 Web phục vụ cho đồ án SmartParking của môn Hệ thống nhúng và Mạng không dây
 
 ## WebDashboard Structure
+```text
 smartparking/
 ├── ai/
 │   └── license_plate_detection.py   # Python script for license plate detection
