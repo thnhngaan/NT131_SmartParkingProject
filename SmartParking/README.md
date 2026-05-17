@@ -1,62 +1,61 @@
 # Smart Parking Dashboard
-A web dashboard for an IoT-based smart parking system tailored for the NT131 course, utilizing Node.js and MongoDB for scalable management.
+Web phục vụ cho đồ án SmartParking của môn Hệ thống nhúng và Mạng không dây
 
 ## WebDashboard Structure
 smartparking/
+├── ai/
+│   └── license_plate_detection.py   # Python script for license plate detection
+├── AI model/
+│   └── yolo_model_files/            # Trained YOLO license plate model files
 ├── config/
-│   └── database.js
+│   └── database.js                  # MongoDB connection logic
 ├── controllers/
-│   ├── authController.js
-│   └── parkingController.js
+│   ├── aiController.js              # AI assistant endpoint handler
+│   ├── authController.js            # Signup, signin, signout, verify admin
+│   └── parkingController.js         # Parking record CRUD, analytics and summary APIs
 ├── middleware/
-│   ├── auth.js
-│   └── error.js
+│   ├── auth.js                      # JWT authentication and admin authorization
+│   └── error.js                     # Global error handler
 ├── models/
-│   ├── User.js
-│   └── ParkingSlot.js
-├── routes/
-│   ├── auth.js
-│   └── parking.js
-├── views/
-│   ├── partials/
-│   │   └── header.ejs
-│   ├── index.ejs
-│   ├── login.ejs
-│   ├── signup.ejs
-│   └── dashboard.ejs
+│   ├── Parking.js                   # Parking log schema
+│   └── User.js                      # User schema
 ├── public/
 │   ├── css/
-│   ├── js/
-│   └── images/
-├── .env
-├── package.json
-├── server.js
-└── README.md
+│   ├── images/
+│   └── js/                          # Static assets for CSS, JS, and images
+├── routes/
+│   ├── ai.js                        # AI assistant route
+│   ├── auth.js                      # Authentication routes
+│   └── parking.js                   # Parking management and analytics routes
+├── views/                           # EJS templates for frontend pages
+├── .env                             # Environment variables (PORT, MONGODB_URI, JWT_SECRET)
+├── mqttHandler.js                   # MQTT gateway for parking event ingestion
+├── package.json                     # Node.js dependencies and scripts
+└── server.js                        # Main Express server and Socket.IO setup
 
 
-## Installation
+## Hướng dẫn cài đặt
 
-1. Clone this repository
+1. Clone repos này về mày
 
-2. Install dependencies
+2. Cài đặt các thư viện
    ```bash
-   npm install
+   npm install (Cài đặt các thư viện trong require)
    ```
 
-3. Set up environment variables:
-   Create a `.env` file in the root directory with:
+3. Cấu hình biến môi trường
+   Tạo một file mới tên là .env nằm ngay tại thư mục gốc (root directory) của dự án và dán đoạn cấu hình sau vào:
    ```
    PORT=3000
    MONGODB_URI=mongodb://localhost:27017/smartparking
-   JWT_SECRET=your_jwt_secret_here
+   JWT_SECRET= ( cá nhân )
    ```
 
-4. Start MongoDB:
-   Make sure MongoDB is running on your system.
+4. Bật MongDB
+   
 
-5. Run the application:
+5. Chạy web
    ```bash
    npm run dev
    ```
-   The server will start on http://localhost:3000
-
+Mở web `http://localhost:3000` trong duyệt trình bất kì.
