@@ -1,5 +1,5 @@
 # NT131_SmartParkingProject
-Đồ án bãi đổ xe thông minh thuộc bộ môn Hệ thống nhúng và Mạng không dây
+Đồ án bãi đỗ xe thông minh thuộc bộ môn Hệ thống nhúng và Mạng không dây
 
 ## Thành viên nhóm
 | MSSV | Họ và tên |
